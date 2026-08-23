@@ -1,0 +1,26 @@
+# Maintainer: jojo2k7
+pkgname=atoll
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="A dynamic island for KDE Plasma"
+arch=('x86_64' 'aarch64')
+url="https://github.com/atoll-shell/atoll"
+license=('GPL-3.0-or-later')
+depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'layer-shell-qt' 'kcoreaddons' 'ki18n' 'dbus')
+makedepends=('cmake' 'ninja' 'qt6-shadertools' 'extra-cmake-modules')
+optdepends=('cava: real spectrum analysis instead of the synthetic one'
+            'wireplumber: volume control from the island'
+            'kde-cli-tools: launching apps from notifications')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cmake -S "$pkgname-$pkgver" -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr
+    cmake --build build
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+}

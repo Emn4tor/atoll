@@ -1,0 +1,56 @@
+#!/bin/sh
+# Thin wrapper around the org.atoll.Atoll D-Bus interface.
+set -eu
+
+BUS_NAME=org.atoll.Atoll
+OBJECT=/Atoll
+IFACE=org.atoll.Atoll
+
+usage() {
+    cat <<'USAGE'
+Usage: atollctl <command> [arguments]
+
+  toggle                       expand or collapse the island
+  expand                       expand the island
+  collapse                     collapse the island
+  text <icon> <text>           show a one-line message
+  progress <icon> <0-100> <t>  show a progress readout
+  reload                       re-read ~/.config/atoll/atoll.json
+  version                      print the running version
+  quit                         stop the island
+
+Examples:
+  atollctl text drive-harddisk "Backup finished"
+  atollctl progress cloud-upload 64 "Uploading"
+USAGE
+}
+
+call() {
+    method=$1
+    shift
+    exec gdbus call --session --dest "$BUS_NAME" --object-path "$OBJECT" \
+        --method "$IFACE.$method" "$@" >/dev/null
+}
+
+[ $# -ge 1 ] || { usage; exit 1; }
+
+command=$1
+shift
+
+case "$command" in
+    toggle|expand|collapse|reload|quit) call "$command" ;;
+    version)
+        gdbus call --session --dest "$BUS_NAME" --object-path "$OBJECT" \
+            --method "$IFACE.version" | tr -d "(),'"
+        ;;
+    text)
+        [ $# -eq 2 ] || { usage; exit 1; }
+        call showText "$1" "$2"
+        ;;
+    progress)
+        [ $# -eq 3 ] || { usage; exit 1; }
+        call showProgress "$1" "$2" "$3"
+        ;;
+    -h|--help|help) usage ;;
+    *) usage; exit 1 ;;
+esac

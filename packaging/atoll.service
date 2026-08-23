@@ -1,0 +1,15 @@
+[Unit]
+Description=Atoll - a dynamic island for KDE Plasma
+PartOf=graphical-session.target
+After=plasma-plasmashell.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/atoll
+ExecReload=/usr/bin/atoll --toggle
+Restart=on-failure
+RestartSec=3
+Slice=session.slice
+
+[Install]
+WantedBy=plasma-workspace.target

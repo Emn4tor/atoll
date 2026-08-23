@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Atoll
+GenericName=Dynamic Island
+Comment=A morphing overlay for notifications, media and system feedback
+Exec=atoll
+Icon=io.github.atoll.Atoll
+Terminal=false
+Categories=Utility;DesktopUtility;
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-enabled=true
+NoDisplay=false
+StartupNotify=false
