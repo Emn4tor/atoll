@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: 2026 The Atoll contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+import QtQuick
+import Atoll
+
+/** A numeric box with steppers, for the sizes and timeouts. */
+Row {
+    id: control
+
+    property real value: 0
+    property real from: 0
+    property real to: 9999
+    property real step: 1
+    property int decimals: 0
+    property string suffix: ""
+
+    signal committed(real value)
+
+    spacing: 6
+
+    function clamp(candidate) {
+        const bounded = Math.max(control.from, Math.min(control.to, candidate))
+        return control.decimals > 0 ? Number(bounded.toFixed(control.decimals)) : Math.round(bounded)
+    }
+
+    InputField {
+        id: box
+        width: 96
+        horizontalAlignment: Text.AlignHCenter
+        value: control.decimals > 0 ? control.value.toFixed(control.decimals) + control.suffix
+                                    : Math.round(control.value) + control.suffix
+        onCommitted: text => {
+            const parsed = parseFloat(String(text).replace(control.suffix, ""))
+            control.committed(control.clamp(isNaN(parsed) ? control.value : parsed))
+        }
+    }
+
+    StepButton {
+        glyph: "−"
+        onClicked: control.committed(control.clamp(control.value - control.step))
+    }
+
+    StepButton {
+        glyph: "+"
+        onClicked: control.committed(control.clamp(control.value + control.step))
+    }
+}

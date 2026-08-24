@@ -11,14 +11,18 @@ Row {
     id: spectrum
 
     property var bars: App.visualizer.bars
+    /** How many bars to draw at most; -1 draws everything the source gives. */
+    property int limit: -1
     property color barColor: Theme.accent
     property real barWidth: 2
     property real minimumHeight: 2
 
+    readonly property var values: limit > 0 ? bars.slice(0, limit) : bars
+
     spacing: 2
 
     Repeater {
-        model: spectrum.bars.length
+        model: spectrum.values.length
 
         Rectangle {
             width: spectrum.barWidth
@@ -26,8 +30,8 @@ Row {
             color: spectrum.barColor
             anchors.verticalCenter: parent.verticalCenter
             height: Math.max(spectrum.minimumHeight,
-                             spectrum.height * Math.max(0, Math.min(1, spectrum.bars[index] ?? 0)))
-            opacity: 0.55 + 0.45 * Math.min(1, spectrum.bars[index] ?? 0)
+                             spectrum.height * Math.max(0, Math.min(1, spectrum.values[index] ?? 0)))
+            opacity: 0.55 + 0.45 * Math.min(1, spectrum.values[index] ?? 0)
 
             Behavior on height {
                 NumberAnimation {

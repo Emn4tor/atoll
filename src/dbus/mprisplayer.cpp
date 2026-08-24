@@ -10,6 +10,7 @@
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QDBusPendingCallWatcher>
+#include <QDBusArgument>
 #include <QDBusPendingReply>
 #include <QDBusObjectPath>
 #include <QDBusVariant>
@@ -32,6 +33,64 @@ QNetworkAccessManager *network()
 {
     static QNetworkAccessManager manager;
     return &manager;
+}
+
+/**
+ * Unwrap a QtDBus value into plain Qt types.
+ *
+ * Only the outermost container of a reply is demarshalled for us; anything
+ * nested - and MPRIS metadata is a map inside a variant, with an array of
+ * artists inside that - arrives as a QDBusArgument that QVariant::toMap() and
+ * friends quietly turn into nothing.
+ */
+QVariant demarshall(const QVariant &value)
+{
+    if (value.canConvert<QDBusObjectPath>()) {
+        return value.value<QDBusObjectPath>().path();
+    }
+    if (value.canConvert<QDBusVariant>()) {
+        return demarshall(value.value<QDBusVariant>().variant());
+    }
+    if (!value.canConvert<QDBusArgument>()) {
+        return value;
+    }
+
+    const QDBusArgument argument = value.value<QDBusArgument>();
+    switch (argument.currentType()) {
+    case QDBusArgument::MapType: {
+        QVariantMap map;
+        argument.beginMap();
+        while (!argument.atEnd()) {
+            QString key;
+            QVariant entry;
+            argument.beginMapEntry();
+            argument >> key >> entry;
+            argument.endMapEntry();
+            map.insert(key, demarshall(entry));
+        }
+        argument.endMap();
+        return map;
+    }
+    case QDBusArgument::ArrayType: {
+        QVariantList list;
+        argument.beginArray();
+        while (!argument.atEnd()) {
+            QVariant entry;
+            argument >> entry;
+            list.append(demarshall(entry));
+        }
+        argument.endArray();
+        return list;
+    }
+    case QDBusArgument::VariantType:
+    case QDBusArgument::BasicType: {
+        QVariant inner;
+        argument >> inner;
+        return demarshall(inner);
+    }
+    default:
+        return value;
+    }
 }
 }
 
@@ -164,7 +223,7 @@ void MprisPlayer::applyPlayerProperties(const QVariantMap &properties)
         }
     }
     if (properties.contains(u"Metadata"_s)) {
-        applyMetadata(properties.value(u"Metadata"_s).toMap());
+        applyMetadata(demarshall(properties.value(u"Metadata"_s)).toMap());
     }
     if (properties.contains(u"Position"_s)) {
         m_position = properties.value(u"Position"_s).toLongLong();
@@ -201,15 +260,18 @@ void MprisPlayer::applyMetadata(const QVariantMap &metadata)
     const qint64 length = metadata.value(u"mpris:length"_s).toLongLong();
     const QString trackId = metadata.value(u"mpris:trackid"_s).toString();
     const QString art = metadata.value(u"mpris:artUrl"_s).toString();
+    const QString url = metadata.value(u"xesam:url"_s).toString();
 
     const QString artist = artists.join(u", "_s);
-    const bool changed = title != m_title || artist != m_artist || album != m_album || length != m_length;
+    const bool changed = title != m_title || artist != m_artist || album != m_album || length != m_length
+        || url != m_url;
 
     m_title = title;
     m_artist = artist;
     m_album = album;
     m_length = length;
     m_trackId = trackId;
+    m_url = url;
 
     if (changed) {
         Q_EMIT metadataChanged();

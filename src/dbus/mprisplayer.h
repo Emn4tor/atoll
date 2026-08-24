@@ -32,6 +32,8 @@ class MprisPlayer : public QObject
     Q_PROPERTY(QString artist READ artist NOTIFY metadataChanged)
     Q_PROPERTY(QString album READ album NOTIFY metadataChanged)
     Q_PROPERTY(QString artUrl READ artUrl NOTIFY artChanged)
+    /** xesam:url of the current track, which is a local path for local files. */
+    Q_PROPERTY(QString url READ url NOTIFY metadataChanged)
     Q_PROPERTY(QColor accent READ accent NOTIFY artChanged)
     Q_PROPERTY(qint64 length READ length NOTIFY metadataChanged)
 
@@ -80,6 +82,10 @@ public:
     QString artUrl() const
     {
         return m_artUrl;
+    }
+    QString url() const
+    {
+        return m_url;
     }
     QColor accent() const
     {
@@ -182,6 +188,7 @@ private:
     QString m_artist;
     QString m_album;
     QString m_artUrl;
+    QString m_url;
     QString m_rawArtUrl;
     QString m_trackId;
     QColor m_accent;

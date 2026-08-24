@@ -15,6 +15,10 @@ Usage: atollctl <command> [arguments]
   collapse                     collapse the island
   text <icon> <text>           show a one-line message
   progress <icon> <0-100> <t>  show a progress readout
+  share <file> [file...]       offer files to nearby devices
+  assistant                    open the assistant with an empty box
+  ask <question>               put a question to the assistant
+  settings                     open the settings window
   reload                       re-read ~/.config/atoll/atoll.json
   version                      print the running version
   quit                         stop the island
@@ -22,6 +26,12 @@ Usage: atollctl <command> [arguments]
 Examples:
   atollctl text drive-harddisk "Backup finished"
   atollctl progress cloud-upload 64 "Uploading"
+  atollctl share ~/Pictures/holiday.jpg
+  atollctl ask "why is my laptop fan so loud"
+  atollctl settings
+
+Binding `atollctl assistant` to a key in System Settings gives the assistant a
+shortcut of its own, for the times the island is not where the pointer is.
 USAGE
 }
 
@@ -38,7 +48,17 @@ command=$1
 shift
 
 case "$command" in
-    toggle|expand|collapse|reload|quit) call "$command" ;;
+    toggle|expand|collapse|quit|assistant) call "$command" ;;
+    reload) call reloadConfig ;;
+    settings)
+        # Works whether or not an island is running: the window is its own
+        # process either way.
+        if gdbus call --session --dest "$BUS_NAME" --object-path "$OBJECT" \
+                --method "$IFACE.settings" >/dev/null 2>&1; then
+            exit 0
+        fi
+        exec atoll --settings
+        ;;
     version)
         gdbus call --session --dest "$BUS_NAME" --object-path "$OBJECT" \
             --method "$IFACE.version" | tr -d "(),'"
@@ -50,6 +70,26 @@ case "$command" in
     progress)
         [ $# -eq 3 ] || { usage; exit 1; }
         call showProgress "$1" "$2" "$3"
+        ;;
+    ask)
+        [ $# -ge 1 ] || { usage; exit 1; }
+        # Everything after the verb is the question, so it can be typed without
+        # quoting it.
+        call ask "$*"
+        ;;
+    share)
+        [ $# -ge 1 ] || { usage; exit 1; }
+        # gdbus wants one array literal, with every path quoted inside it.
+        list=""
+        for path in "$@"; do
+            case "$path" in
+                /*) absolute=$path ;;
+                *) absolute=$PWD/$path ;;
+            esac
+            escaped=$(printf '%s' "$absolute" | sed "s/'/\\\\'/g")
+            list="$list'$escaped',"
+        done
+        call share "[${list%,}]"
         ;;
     -h|--help|help) usage ;;
     *) usage; exit 1 ;;

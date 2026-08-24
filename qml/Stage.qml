@@ -10,15 +10,35 @@ import Atoll
  * can morph without the compositor resizing anything. What keeps the rest of
  * the screen usable is the input region, which is kept clipped to the island's
  * actual bodies and nothing else.
+ *
+ * The surface is anchored to the top or the bottom edge of the screen by the
+ * shell; where the island sits *inside* it is decided here.
  */
 Item {
     id: stage
 
     property var targetWindow: null
+    property string screenName: ""
+
+    readonly property bool atBottom: Cfg.atBottom
+    readonly property string alignment: Cfg.position.endsWith("left")
+                                        ? "left"
+                                        : (Cfg.position.endsWith("right") ? "right" : "center")
 
     /** How far the satellite currently sticks out past the main body. */
     readonly property real satelliteExtent: Math.max(0, island.satelliteGap + island.satelliteSize)
     readonly property real totalWidth: island.width + satelliteExtent
+
+    readonly property real islandX: {
+        switch (alignment) {
+        case "left":
+            return Cfg.sideMargin
+        case "right":
+            return Math.max(0, stage.width - totalWidth - Cfg.sideMargin)
+        default:
+            return Math.round((stage.width - totalWidth) / 2)
+        }
+    }
 
     GooLayer {
         anchors.fill: parent
@@ -28,6 +48,8 @@ Item {
         mainGeometry: island.mainGeometry
         satelliteGeometry: island.satelliteGeometry
         mainRadius: island.cornerRadius
+        mainTopRadius: island.topRadius
+        mainBottomRadius: island.bottomRadius
         satelliteRadius: -1
     }
 
@@ -40,13 +62,23 @@ Item {
         mainGeometry: island.mainGeometry
         satelliteGeometry: island.satelliteGeometry
         mainRadius: island.cornerRadius
+        mainTopRadius: island.topRadius
+        mainBottomRadius: island.bottomRadius
         satelliteRadius: -1
     }
 
     Island {
         id: island
-        x: Math.round((stage.width - stage.totalWidth) / 2)
-        y: 0
+        targetWindow: stage.targetWindow
+        x: stage.islandX
+        y: stage.atBottom ? Math.max(0, stage.height - height) : 0
+    }
+
+    // The dashboard can be taller than the configured canvas, especially with
+    // a lyrics panel and a stack of notifications in it. Ask for the room.
+    readonly property int neededHeight: Math.ceil(island.height) + 48
+    onNeededHeightChanged: if (targetWindow) {
+        App.shell.ensureSurfaceHeight(targetWindow, neededHeight)
     }
 
     // ---- input region ----------------------------------------------------
@@ -69,7 +101,8 @@ Item {
             }
             if (rects.length === 0 && (Cfg.behavior.hoverPeek ?? true)) {
                 // A hidden island still needs somewhere to be woken up from.
-                rects.push(Qt.rect((stage.width - 60) / 2, 0, 60, 3))
+                const centre = stage.islandX + island.width / 2
+                rects.push(Qt.rect(centre - 30, stage.atBottom ? stage.height - 3 : 0, 60, 3))
             }
             return rects
         }

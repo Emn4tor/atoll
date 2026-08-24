@@ -18,6 +18,8 @@ Item {
     property rect mainGeometry: Qt.rect(0, 0, 0, 0)
     property rect satelliteGeometry: Qt.rect(0, 0, 0, 0)
     property real mainRadius: -1
+    property real mainTopRadius: -1
+    property real mainBottomRadius: -1
     property real satelliteRadius: -1
     property color fill: "#0b0b0e"
     property bool gooey: true
@@ -35,6 +37,8 @@ Item {
         Blob {
             geometry: root.mainGeometry
             cornerRadius: root.mainRadius
+            topRadius: root.mainTopRadius
+            bottomRadius: root.mainBottomRadius
             color: root.shadowMode ? "black" : root.fill
         }
         Blob {

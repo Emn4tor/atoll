@@ -3,7 +3,7 @@ Type=Application
 Name=Atoll
 GenericName=Dynamic Island
 Comment=A morphing overlay for notifications, media and system feedback
-Exec=atoll
+Exec=@ATOLL_BINARY@
 Icon=io.github.atoll.Atoll
 Terminal=false
 Categories=Utility;DesktopUtility;
@@ -11,3 +11,17 @@ X-KDE-autostart-phase=2
 X-GNOME-Autostart-enabled=true
 NoDisplay=false
 StartupNotify=false
+# KWin only hands out kde_lockscreen_overlay_v1 to clients whose desktop file
+# asks for it by name, and it finds that file by matching Exec against the
+# running executable - canonically, which is why Exec is an absolute path here.
+# An Atoll started from a build directory therefore never gets the permission.
+X-KDE-Wayland-Interfaces=kde_lockscreen_overlay_v1
+Actions=Settings;Toggle;
+
+[Desktop Action Settings]
+Name=Settings
+Exec=@ATOLL_BINARY@ --settings
+
+[Desktop Action Toggle]
+Name=Expand or collapse
+Exec=@ATOLL_BINARY@ --toggle

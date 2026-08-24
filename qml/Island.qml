@@ -14,6 +14,9 @@ import Atoll
 Item {
     id: island
 
+    /** The surface this island lives on, needed to ask for the keyboard. */
+    property var targetWindow: null
+
     // ---- what the stage needs to draw ------------------------------------
     readonly property rect mainGeometry: Qt.rect(x, y, width, height)
     readonly property rect satelliteGeometry: Qt.rect(x + width + satelliteGap,
@@ -29,20 +32,65 @@ Item {
         return mode === "expanded" ? 26 : height / 2
     }
 
+    /**
+     * A notch grows out of the screen edge: the two corners touching the edge
+     * are square, so there is no seam between the island and the bezel. A pill
+     * is rounded all the way around and floats below the edge instead.
+     */
+    readonly property bool notch: Cfg.shape === "notch"
+    readonly property real topRadius: notch ? (Cfg.atBottom ? cornerRadius : 0) : cornerRadius
+    readonly property real bottomRadius: notch ? (Cfg.atBottom ? 0 : cornerRadius) : cornerRadius
+
     // ---- state -----------------------------------------------------------
     property bool expanded: false
     property bool notificationSticky: false
     property var currentNotification: ({})
 
+    /**
+     * The assistant has the island to itself while it is in front. It is not
+     * one more thing competing for the pill: it was opened deliberately, by a
+     * long press, and anything that interrupted it would interrupt the user
+     * mid-sentence.
+     */
+    readonly property bool aiEnabled: Cfg.aiEnabled && !locked
+    readonly property bool aiActive: aiEnabled && App.ai.engaged && !App.ai.background
+    /** Still working, but out of the way: only the pill reports it. */
+    readonly property bool aiInBackground: aiEnabled && App.ai.background && App.ai.busy
+
     readonly property bool hasMedia: App.media.active !== null && (Cfg.modules.media ?? true)
+    /** A drag hovering the island, or a transfer in either direction. */
+    readonly property bool sharingEnabled: Cfg.modules.sharing ?? true
+    readonly property bool dragActive: dropZone.containsDrag
+    readonly property bool sharing: sharingEnabled && (dragActive || App.share.state !== "idle")
     readonly property bool mediaPlaying: hasMedia && App.media.active.playing
     readonly property bool hovered: hoverHandler.hovered
+
+    // ---- lock screen -----------------------------------------------------
+    //
+    // The island can be allowed to outlive the lock screen, which makes what it
+    // shows there a privacy question rather than a layout one: a notification
+    // body or a backlog of them is exactly what a locked machine should not be
+    // handing out. What is on by default there is what a passer-by may read.
+    readonly property bool locked: App.lock.locked
+    readonly property bool lockedQuiet: locked && !(Cfg.lockScreen.showNotifications ?? false)
+    readonly property bool lockedNoMedia: locked && !(Cfg.lockScreen.showMedia ?? true)
+    readonly property bool canExpand: !locked || (Cfg.lockScreen.allowExpanding ?? false)
 
     /**
      * Priority order, highest first. An OSD outranks a notification because it
      * is a direct response to something the user just did.
      */
     readonly property string mode: {
+        // The assistant outranks everything, including sharing: the user
+        // opened it on purpose and is very likely typing into it.
+        if (aiActive) {
+            return "ai"
+        }
+        // Sharing is next: it is either a drag the user is holding over the
+        // island right now, or a stranger waiting for an answer.
+        if (sharing) {
+            return "share"
+        }
         if (expanded) {
             return "expanded"
         }
@@ -52,25 +100,26 @@ Item {
         if (osdTimer.running) {
             return "osd"
         }
-        if (notificationTimer.running || notificationSticky) {
+        if ((notificationTimer.running || notificationSticky) && !lockedQuiet) {
             return "notification"
         }
-        if (mediaTimer.running) {
+        if (mediaTimer.running && !lockedNoMedia) {
             return "media"
         }
-        if (hovered && hasMedia && (Cfg.behavior.hoverPeek ?? true)) {
+        if (hovered && hasMedia && !lockedNoMedia && (Cfg.behavior.hoverPeek ?? true)) {
             return "media"
         }
         return "idle"
     }
 
-    readonly property bool satelliteVisible: mode === "idle" && mediaPlaying && (Cfg.modules.media ?? true)
+    readonly property bool satelliteVisible: mode === "idle" && mediaPlaying && !lockedNoMedia
+                                             && (Cfg.modules.media ?? true)
     property real satelliteSize: satelliteVisible ? Cfg.collapsedHeight : 0
     // A negative gap keeps the satellite tucked inside the body until it is
     // ready to emerge, which is what makes the separation read as budding off.
     property real satelliteGap: satelliteVisible ? 9 : -Cfg.collapsedHeight
 
-    width: Math.max(0, Math.min(Cfg.maxWidth, stack.contentWidth))
+    width: Math.max(0, Math.min(mode === "ai" ? Cfg.maxAiWidth : Cfg.maxWidth, stack.contentWidth))
     height: Math.max(0, stack.contentHeight)
 
     Behavior on width {
@@ -200,13 +249,28 @@ Item {
             if (App.debugState) {
                 console.warn("atoll: ipc expand")
             }
-            island.expanded = true
+            island.expanded = island.canExpand
         }
         function onCollapseRequested() {
             island.expanded = false
         }
         function onToggleRequested() {
             island.expanded = !island.expanded
+        }
+    }
+
+    Connections {
+        target: App.lock
+
+        function onLockedChanged() {
+            // Whatever was on screen belongs to the session that just went away.
+            if (!island.canExpand) {
+                island.expanded = false
+            }
+            if (island.lockedQuiet) {
+                island.notificationSticky = false
+                notificationTimer.stop()
+            }
         }
     }
 
@@ -242,6 +306,10 @@ Item {
 
         property Component target: {
             switch (island.mode) {
+            case "ai":
+                return aiComponent
+            case "share":
+                return shareComponent
             case "expanded":
                 return expandedComponent
             case "warning":
@@ -323,6 +391,10 @@ Item {
         anchors.fill: parent
         visible: Theme.border
         radius: island.cornerRadius
+        topLeftRadius: island.topRadius
+        topRightRadius: island.topRadius
+        bottomLeftRadius: island.bottomRadius
+        bottomRightRadius: island.bottomRadius
         color: "transparent"
         border.width: 1
         border.color: Theme.borderColor
@@ -349,24 +421,84 @@ Item {
             height: parent.height * 0.42
             barWidth: 2
             spacing: 2
-            bars: App.visualizer.bars.slice(0, 4)
+            limit: 4
         }
     }
 
     // ---- interaction -----------------------------------------------------
+    //
+    // A layer surface gets no keyboard unless it asks, and asking for one
+    // permanently would swallow every shortcut in the session. So the island
+    // takes the keyboard only while there is a text field on it, and gives it
+    // straight back afterwards.
+    onAiActiveChanged: if (targetWindow) {
+        App.shell.setKeyboardFocus(targetWindow, aiActive)
+    }
+
+    Component.onDestruction: if (targetWindow) {
+        App.shell.setKeyboardFocus(targetWindow, false)
+    }
+
     HoverHandler {
         id: hoverHandler
+    }
+
+    // Files dragged onto the island are offered to whoever is nearby. The
+    // island itself is the drop target, so it has to be the thing that grows
+    // under the pointer - which is what turning the mode into "share" does.
+    DropArea {
+        id: dropZone
+        anchors.fill: parent
+        enabled: island.sharingEnabled
+        keys: ["text/uri-list"]
+
+        onEntered: drag => {
+            if (!drag.hasUrls) {
+                drag.accepted = false
+                return
+            }
+            App.share.probe()
+        }
+
+        onDropped: drop => {
+            if (!drop.hasUrls) {
+                return
+            }
+            App.share.offer(drop.urls)
+            drop.accept(Qt.CopyAction)
+        }
+    }
+
+    TapHandler {
+        acceptedButtons: Qt.LeftButton
+        enabled: island.aiEnabled
+        longPressThreshold: Cfg.aiLongPress / 1000
+        onLongPressed: {
+            App.ai.engage()
+            island.expanded = false
+        }
     }
 
     TapHandler {
         acceptedButtons: Qt.LeftButton
         onTapped: {
+            if (island.aiInBackground) {
+                // Whatever it is doing, the user wants to see it again.
+                App.ai.bringToFront()
+                return
+            }
+            if (island.mode === "ai") {
+                return // The assistant has its own buttons.
+            }
+            if (island.mode === "share") {
+                return // The share view has its own buttons.
+            }
             if (island.mode === "notification") {
                 island.notificationSticky = false
                 notificationTimer.stop()
                 return
             }
-            if ((Cfg.behavior.clickAction ?? "expand") === "expand") {
+            if ((Cfg.behavior.clickAction ?? "expand") === "expand" && island.canExpand) {
                 island.expanded = !island.expanded
             }
         }
@@ -381,8 +513,31 @@ Item {
         }
     }
 
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: {
+            if (island.mode === "ai") {
+                App.ai.dismiss()
+                return
+            }
+            if (island.mode === "share") {
+                App.share.dismiss()
+                return
+            }
+            switch (Cfg.behavior.rightClickAction ?? "settings") {
+            case "settings":
+                App.openSettings()
+                island.expanded = false
+                break
+            case "collapse":
+                island.expanded = false
+                break
+            }
+        }
+    }
+
     WheelHandler {
-        enabled: Cfg.behavior.scrollAdjustsVolume ?? true
+        enabled: (Cfg.behavior.scrollAdjustsVolume ?? true) && island.mode !== "ai"
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
         onWheel: event => {
             const step = Cfg.behavior.volumeStep ?? 5
@@ -423,6 +578,20 @@ Item {
         id: expandedComponent
         ExpandedView {
             onCollapseRequested: island.expanded = false
+        }
+    }
+
+    Component {
+        id: shareComponent
+        ShareView {
+            dragging: island.dragActive
+        }
+    }
+
+    Component {
+        id: aiComponent
+        AiView {
+            onDismissRequested: App.ai.dismiss()
         }
     }
 

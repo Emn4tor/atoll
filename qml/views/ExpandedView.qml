@@ -13,6 +13,9 @@ Item {
 
     readonly property var player: App.media.active
     readonly property bool hasMedia: player !== null && (Cfg.modules.media ?? true)
+    readonly property bool hasLyrics: hasMedia && Cfg.lyricsInExpanded
+                                      && (App.lyrics.synced || App.lyrics.plain.length > 0
+                                          || App.lyrics.state === "loading")
 
     signal collapseRequested()
 
@@ -54,41 +57,28 @@ Item {
                 }
             }
 
-            Row {
+            Item {
+                visible: App.battery.present && (Cfg.modules.battery ?? true)
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: 10
+                width: 34
+                height: 34
 
-                Item {
-                    visible: App.battery.present && (Cfg.modules.battery ?? true)
-                    width: 34
-                    height: 34
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    ProgressRing {
-                        anchors.fill: parent
-                        value: App.battery.percent / 100
-                        fillColor: App.battery.percent <= 15 && !App.battery.charging
-                                   ? Theme.critical
-                                   : (App.battery.charging ? Theme.positive : Theme.accent)
-                    }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: App.battery.percent
-                        color: Theme.foreground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.size(10)
-                        font.weight: Font.DemiBold
-                    }
+                ProgressRing {
+                    anchors.fill: parent
+                    value: App.battery.percent / 100
+                    fillColor: App.battery.percent <= 15 && !App.battery.charging
+                               ? Theme.critical
+                               : (App.battery.charging ? Theme.positive : Theme.accent)
                 }
 
-                RoundButton {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 30
-                    height: 30
-                    icon: ["window-close", "dialog-close"]
-                    onClicked: view.collapseRequested()
+                Text {
+                    anchors.centerIn: parent
+                    text: App.battery.percent
+                    color: Theme.foreground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.size(10)
+                    font.weight: Font.DemiBold
                 }
             }
         }
@@ -198,6 +188,21 @@ Item {
                         }
                     }
                 }
+            }
+        }
+
+        // ---- lyrics -------------------------------------------------------
+        Rectangle {
+            visible: view.hasLyrics
+            width: parent.width
+            height: visible ? lyrics.implicitHeight + 24 : 0
+            radius: 16
+            color: Qt.rgba(1, 1, 1, 0.06)
+
+            LyricsView {
+                id: lyrics
+                anchors.fill: parent
+                anchors.margins: 12
             }
         }
 
@@ -314,9 +319,20 @@ Item {
             }
 
             QuickToggle {
+                visible: Cfg.modules.lyrics ?? true
+                icon: ["view-media-lyrics", "view-media-track"]
+                label: qsTr("Lyrics")
+                checked: Cfg.lyrics.enabled ?? true
+                onToggled: App.config.setValue("lyrics.enabled", !(Cfg.lyrics.enabled ?? true))
+            }
+
+            QuickToggle {
                 icon: ["configure", "settings-configure"]
-                label: qsTr("Config")
-                onToggled: App.openUrl("file://" + App.config.path)
+                label: qsTr("Settings")
+                onToggled: {
+                    App.openSettings()
+                    view.collapseRequested()
+                }
             }
         }
     }

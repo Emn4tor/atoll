@@ -89,6 +89,10 @@ void MprisManager::addPlayer(const QString &service)
         }
     }
 
+    if (qEnvironmentVariableIntValue("ATOLL_DEBUG_STATE") > 0) {
+        qWarning("atoll: media player appeared: %s", qUtf8Printable(service));
+    }
+
     auto *player = new MprisPlayer(service, this);
     m_players.append(player);
 
@@ -137,21 +141,27 @@ void MprisManager::reevaluateActive()
         }
     }
 
-    if (!chosen) {
-        // A configured preference wins, in the order the user listed it.
-        const QStringList preferred = m_config->value(u"media.preferred"_s).toStringList();
+    // A configured preference wins, in the order the user listed it - but a
+    // preferred player that is merely open must not outrank one that is
+    // actually playing, so the list is walked twice.
+    const QStringList preferred = m_config->value(u"media.preferred"_s).toStringList();
+    const auto pickPreferred = [this, &preferred](bool playingOnly) -> MprisPlayer * {
         for (const QString &pattern : preferred) {
             for (MprisPlayer *player : std::as_const(m_players)) {
+                if (playingOnly && !player->playing()) {
+                    continue;
+                }
                 if (player->service().contains(pattern, Qt::CaseInsensitive)
                     || player->identity().contains(pattern, Qt::CaseInsensitive)) {
-                    chosen = player;
-                    break;
+                    return player;
                 }
             }
-            if (chosen) {
-                break;
-            }
         }
+        return nullptr;
+    };
+
+    if (!chosen) {
+        chosen = pickPreferred(true);
     }
 
     if (!chosen) {
@@ -164,6 +174,10 @@ void MprisManager::reevaluateActive()
                 chosen = player;
             }
         }
+    }
+
+    if (!chosen) {
+        chosen = pickPreferred(false);
     }
 
     if (!chosen && m_active && m_players.contains(m_active)) {

@@ -9,6 +9,7 @@
 
 // Every backend below is exposed as a Q_PROPERTY, and the meta type system
 // needs the complete types, not forward declarations.
+#include "ai/aiservice.h"
 #include "app/shellwindow.h"
 #include "dbus/dbusmonitor.h"
 #include "config/config.h"
@@ -16,8 +17,11 @@
 #include "dbus/notificationmodel.h"
 #include "dbus/osdmonitor.h"
 #include "ipc/ipcservice.h"
+#include "media/lyricsservice.h"
+#include "share/shareservice.h"
 #include "system/battery.h"
 #include "system/clock.h"
+#include "system/lockmonitor.h"
 #include "system/visualizer.h"
 
 class DBusMonitor;
@@ -44,6 +48,10 @@ class Application : public QObject
     Q_PROPERTY(Battery *battery READ battery CONSTANT)
     Q_PROPERTY(Clock *clock READ clock CONSTANT)
     Q_PROPERTY(Visualizer *visualizer READ visualizer CONSTANT)
+    Q_PROPERTY(LyricsService *lyrics READ lyrics CONSTANT)
+    Q_PROPERTY(LockMonitor *lock READ lock CONSTANT)
+    Q_PROPERTY(ShareService *share READ share CONSTANT)
+    Q_PROPERTY(AiService *ai READ ai CONSTANT)
     Q_PROPERTY(IpcService *ipc READ ipc CONSTANT)
 
     Q_PROPERTY(QString version READ version CONSTANT)
@@ -54,6 +62,8 @@ class Application : public QObject
     /** False when the bus tap could not be established (see busError). */
     Q_PROPERTY(bool busTapActive READ busTapActive NOTIFY busTapChanged)
     Q_PROPERTY(QString busError READ busError NOTIFY busTapChanged)
+    /** Which settings page to open on, when the island asked for a specific one. */
+    Q_PROPERTY(QString settingsPage READ settingsPage CONSTANT)
 
 public:
     static Application *instance();
@@ -104,12 +114,29 @@ public:
     {
         return m_visualizer;
     }
+    LyricsService *lyrics() const
+    {
+        return m_lyrics;
+    }
+    LockMonitor *lock() const
+    {
+        return m_lock;
+    }
     IpcService *ipc() const
     {
         return m_ipc;
     }
+    ShareService *share() const
+    {
+        return m_share;
+    }
+    AiService *ai() const
+    {
+        return m_ai;
+    }
 
     QString version() const;
+    QString settingsPage() const;
     bool debugSurface() const;
     bool debugState() const;
     bool busTapActive() const
@@ -127,6 +154,16 @@ public:
     /** Launch a desktop entry (used when a notification is clicked). */
     Q_INVOKABLE void activateApp(const QString &desktopEntry);
     Q_INVOKABLE void openUrl(const QString &url);
+    /**
+     * Open the settings window, or raise the one that is already up. `page` is
+     * a page name to land on, e.g. "ai" when the island offers to set the
+     * assistant up.
+     */
+    Q_INVOKABLE void openSettings(const QString &page = {});
+    /** Whether an island process holds the bus name (asked by the settings window). */
+    Q_INVOKABLE bool islandRunning() const;
+    /** Start an island, for when the settings window is the only thing running. */
+    Q_INVOKABLE void startIsland();
 
 Q_SIGNALS:
     void busTapChanged();
@@ -145,7 +182,11 @@ private:
     Battery *m_battery = nullptr;
     Clock *m_clock = nullptr;
     Visualizer *m_visualizer = nullptr;
+    LyricsService *m_lyrics = nullptr;
+    LockMonitor *m_lock = nullptr;
     IpcService *m_ipc = nullptr;
+    ShareService *m_share = nullptr;
+    AiService *m_ai = nullptr;
 
     bool m_busTapActive = false;
     QString m_busError;

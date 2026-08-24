@@ -10,6 +10,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QJSValue>
+#include <QJsonValue>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QtGlobal>
@@ -31,6 +34,10 @@ Config::Config(QObject *parent)
         QTimer::singleShot(120, this, &Config::reload);
     });
 
+    m_saveTimer.setSingleShot(true);
+    m_saveTimer.setInterval(220);
+    connect(&m_saveTimer, &QTimer::timeout, this, &Config::save);
+
     reload();
 }
 
@@ -38,17 +45,22 @@ QVariantMap Config::defaults()
 {
     static const char *json = R"JSON({
   "island": {
-    "screen": "primary",
+    "screens": ["primary"],
+    "position": "top-center",
+    "shape": "notch",
     "layer": "overlay",
-    "topMargin": 0,
+    "overlapPanels": true,
+    "exclusiveZone": 0,
+    "edgeMargin": 0,
+    "sideMargin": 24,
     "collapsedWidth": 168,
     "collapsedHeight": 32,
     "expandedWidth": 460,
     "maxWidth": 620,
     "cornerRadius": 0,
-    "idleMode": "notch",
-    "exclusiveZone": 0,
-    "surfaceHeight": 520
+    "idleMode": "auto",
+    "alwaysVisible": true,
+    "surfaceHeight": 700
   },
   "appearance": {
     "background": "#0b0b0e",
@@ -77,7 +89,10 @@ QVariantMap Config::defaults()
     "media": true,
     "battery": true,
     "visualizer": true,
-    "clock": true
+    "clock": true,
+    "lyrics": true,
+    "sharing": true,
+    "ai": true
   },
   "osd": {
     "timeout": 1700,
@@ -98,7 +113,54 @@ QVariantMap Config::defaults()
     "preferred": [],
     "blocked": [],
     "visualizerBars": 26,
-    "cava": "auto"
+    "cava": "auto",
+    "showArt": true,
+    "showAlbum": true,
+    "idleBadge": true
+  },
+  "lockScreen": {
+    "enabled": true,
+    "showMedia": true,
+    "showNotifications": false,
+    "allowExpanding": false
+  },
+  "lyrics": {
+    "enabled": true,
+    "showInIsland": true,
+    "showInExpanded": true,
+    "seekOnClick": true,
+    "offsetMs": 0,
+    "cache": true
+  },
+  "sharing": {
+    "alias": "",
+    "receive": true,
+    "autoAccept": false,
+    "saveDirectory": "",
+    "port": 53317,
+    "multicast": "224.0.0.167"
+  },
+  "ai": {
+    "enabled": true,
+    "provider": "anthropic",
+    "model": "",
+    "effort": "high",
+    "maxTokens": 16000,
+    "baseUrl": "",
+    "webSearch": true,
+    "allowScreenshots": true,
+    "systemPrompt": "",
+    "commandTimeout": 180,
+    "longPressMs": 450,
+    "panelWidth": 560,
+    "glow": true,
+    "glowIntensity": 0.8,
+    "glowThickness": 130,
+    "avatar": true,
+    "permissions": {
+      "mode": "guarded",
+      "allowRoot": true
+    }
   },
   "behavior": {
     "expandOnHover": false,
@@ -108,7 +170,8 @@ QVariantMap Config::defaults()
     "scrollAdjustsVolume": true,
     "volumeStep": 5,
     "clickAction": "expand",
-    "middleClickAction": "playPause"
+    "middleClickAction": "playPause",
+    "rightClickAction": "settings"
   },
   "clock": {
     "timeFormat": "HH:mm",
@@ -189,20 +252,105 @@ QVariant Config::value(const QString &dottedKey, const QVariant &fallback) const
     return cursor.isValid() ? cursor : fallback;
 }
 
+QVariant Config::defaultValue(const QString &dottedKey) const
+{
+    static const QVariantMap builtin = defaults();
+    const QStringList parts = dottedKey.split(u'.', Qt::SkipEmptyParts);
+    QVariant cursor = builtin;
+    for (const QString &part : parts) {
+        if (cursor.typeId() != QMetaType::QVariantMap) {
+            return {};
+        }
+        cursor = cursor.toMap().value(part);
+    }
+    return cursor;
+}
+
+bool Config::insertAt(QVariantMap &target, const QStringList &parts, const QVariant &value)
+{
+    if (parts.isEmpty()) {
+        return false;
+    }
+    if (parts.size() == 1) {
+        if (target.value(parts.first()) == value && target.contains(parts.first())) {
+            return false;
+        }
+        target.insert(parts.first(), value);
+        return true;
+    }
+
+    QVariantMap sub = target.value(parts.first()).toMap();
+    if (!insertAt(sub, parts.mid(1), value)) {
+        return false;
+    }
+    target.insert(parts.first(), sub);
+    return true;
+}
+
+void Config::setValue(const QString &dottedKey, const QVariant &value)
+{
+    const QStringList parts = dottedKey.split(u'.', Qt::SkipEmptyParts);
+
+    // A JS array or object arrives wrapped in a QJSValue, and QJsonValue has
+    // no idea what that is - it would quietly write null and take the setting
+    // with it. Unwrap first, then normalise, so a slider does not persist as a
+    // double where an int was meant.
+    QVariant plain = value;
+    if (plain.userType() == qMetaTypeId<QJSValue>()) {
+        plain = plain.value<QJSValue>().toVariant();
+    }
+
+    const QVariant normalised = QJsonValue::fromVariant(plain).toVariant();
+    if (plain.isValid() && normalised.isNull()) {
+        qWarning("atoll: refusing to store %s, its value cannot be written as JSON",
+                 qUtf8Printable(dottedKey));
+        return;
+    }
+    if (!insertAt(m_data, parts, normalised)) {
+        return;
+    }
+    Q_EMIT changed();
+    m_saveTimer.start();
+}
+
+void Config::resetValue(const QString &dottedKey)
+{
+    setValue(dottedKey, defaultValue(dottedKey));
+}
+
+void Config::resetAll()
+{
+    const QVariantMap builtin = defaults();
+    if (builtin == m_data) {
+        return;
+    }
+    m_data = builtin;
+    Q_EMIT changed();
+    m_saveTimer.start();
+}
+
+void Config::save()
+{
+    const QFileInfo info(m_path);
+    QDir().mkpath(info.absolutePath());
+
+    QSaveFile file(m_path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning("atoll: cannot write %s", qUtf8Printable(m_path));
+        return;
+    }
+    file.write(QJsonDocument(QJsonObject::fromVariantMap(m_data)).toJson(QJsonDocument::Indented));
+    if (!file.commit()) {
+        qWarning("atoll: cannot commit %s", qUtf8Printable(m_path));
+        return;
+    }
+    applyWatch();
+}
+
 void Config::ensureUserFile()
 {
     if (QFile::exists(m_path)) {
         return;
     }
-    const QFileInfo info(m_path);
-    QDir().mkpath(info.absolutePath());
-
-    QFile file(m_path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        qWarning("atoll: cannot write default config to %s", qUtf8Printable(m_path));
-        return;
-    }
-    file.write(QJsonDocument(QJsonObject::fromVariantMap(defaults())).toJson(QJsonDocument::Indented));
-    file.close();
-    applyWatch();
+    save();
 }

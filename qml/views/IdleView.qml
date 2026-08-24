@@ -4,16 +4,31 @@ import QtQuick
 import Atoll
 
 /**
- * The resting state. In "notch" mode it is a bare pill that reads as part of
- * the screen bezel; in "clock" mode it shows the time. Either way it grows a
- * small status cluster on the right when there is something to say.
+ * The resting state, and the one the island spends its day in - so it is never
+ * empty. "auto" shows the clock, plus the cover of whatever is playing and a
+ * dot for anything waiting; "notch" keeps the bare pill; "clock" is the time on
+ * its own. Only "hidden" collapses it to nothing, and only when the island is
+ * explicitly allowed to disappear.
  */
 Item {
     id: view
 
-    readonly property bool showClock: Cfg.idleMode === "clock"
-    readonly property bool hasUnread: App.notifications.count > 0 && !App.notifications.doNotDisturb
+    readonly property bool autoMode: Cfg.idleMode === "auto"
+    readonly property bool showClock: (autoMode || Cfg.idleMode === "clock") && (Cfg.modules.clock ?? true)
     readonly property bool playing: App.media.active !== null && App.media.active.playing
+                                    && (Cfg.modules.media ?? true)
+    readonly property bool showCover: autoMode && playing && (Cfg.media.idleBadge ?? true)
+                                      && (!App.lock.locked || (Cfg.lockScreen.showMedia ?? true))
+    readonly property bool hasUnread: App.notifications.count > 0 && !App.notifications.doNotDisturb
+                                      && (Cfg.modules.notifications ?? true)
+    readonly property bool lowBattery: (Cfg.modules.battery ?? true) && App.battery.present
+                                       && App.battery.percent <= 15 && !App.battery.charging
+    /**
+     * A job the user sent away is still theirs, so the pill keeps a face on it.
+     * This is the whole of "continue in background": no window, no taskbar
+     * entry, just the island quietly getting on with it.
+     */
+    readonly property bool assistantBusy: Cfg.aiEnabled && App.ai.background && App.ai.busy
 
     implicitHeight: Cfg.collapsedHeight
     implicitWidth: Cfg.idleMode === "hidden"
@@ -23,7 +38,25 @@ Item {
     Row {
         id: content
         anchors.centerIn: parent
-        spacing: 10
+        spacing: 8
+
+        BloubBot {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: view.assistantBusy && Cfg.get("ai.avatar", true)
+            size: 18
+            mood: App.ai.state === "permission" ? "alert" : "working"
+            bodyColor: App.ai.state === "permission" ? Theme.critical : Theme.accent
+        }
+
+        AlbumArt {
+            anchors.verticalCenter: parent.verticalCenter
+            width: 20
+            height: 20
+            cornerRadius: width * 0.3
+            visible: view.showCover
+            source: view.playing ? App.media.active.artUrl : ""
+            fallbackIcon: view.playing ? App.media.active.iconName : "media-optical-audio"
+        }
 
         Text {
             visible: view.showClock
@@ -49,6 +82,15 @@ Item {
                 NumberAnimation { to: 0.35; duration: 900; easing.type: Easing.InOutSine }
                 NumberAnimation { to: 1.0; duration: 900; easing.type: Easing.InOutSine }
             }
+        }
+
+        Rectangle {
+            visible: view.lowBattery
+            anchors.verticalCenter: parent.verticalCenter
+            width: 6
+            height: 6
+            radius: 3
+            color: Theme.critical
         }
     }
 }

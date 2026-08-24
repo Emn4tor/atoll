@@ -6,6 +6,7 @@
 
 #include <QFileSystemWatcher>
 #include <QObject>
+#include <QTimer>
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
@@ -14,7 +15,9 @@
  *
  * The user file is deep-merged on top of the built-in defaults, so a config
  * only has to name the keys it wants to override. The file is watched and
- * re-read on change, which makes tweaking the island a live operation.
+ * re-read on change, which makes tweaking the island a live operation - and
+ * that is also what carries edits made in the settings window, which runs in
+ * its own process, back to the running island.
  */
 class Config : public QObject
 {
@@ -41,6 +44,22 @@ public:
     /** Look up a dotted path, e.g. value("island.collapsedWidth", 172). */
     Q_INVOKABLE QVariant value(const QString &dottedKey, const QVariant &fallback = {}) const;
 
+    /** The built-in value for a dotted path, ignoring the user file. */
+    Q_INVOKABLE QVariant defaultValue(const QString &dottedKey) const;
+
+    /**
+     * Write a dotted path and persist it. The change is published immediately
+     * and the file is written a moment later, so dragging a slider does not
+     * mean one disk write per frame.
+     */
+    Q_INVOKABLE void setValue(const QString &dottedKey, const QVariant &value);
+
+    /** Put one key back to its built-in value. */
+    Q_INVOKABLE void resetValue(const QString &dottedKey);
+
+    /** Put every key back to its built-in value. */
+    Q_INVOKABLE void resetAll();
+
     /** Re-read the file from disk. */
     Q_INVOKABLE void reload();
 
@@ -54,9 +73,12 @@ Q_SIGNALS:
 
 private:
     void applyWatch();
+    void save();
     static void deepMerge(QVariantMap &target, const QVariantMap &overlay);
+    static bool insertAt(QVariantMap &target, const QStringList &parts, const QVariant &value);
 
     QString m_path;
     QVariantMap m_data;
     QFileSystemWatcher m_watcher;
+    QTimer m_saveTimer;
 };
