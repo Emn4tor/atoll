@@ -177,6 +177,35 @@ You decide how much of this is on at all, under **Settings → Assistant**:
 stops asking about your own files but still sends every root action through
 polkit. Administrator access can be switched off outright.
 
+### It can ask you back
+
+The assistant is not only answering: sometimes it needs a decision from you -
+which of two ways to do something, which of three files you meant, whether to
+go ahead. There is no keyboard in front of you at that moment, only the island,
+so a question like that is not written into the answer where nobody can reply
+to it. It arrives as a line of text with the answers underneath it as buttons,
+and the one it would recommend is the one that looks like the answer. Tap one
+and it carries on with what you said; **Never mind** closes the question, which
+the assistant is told about and works around.
+
+### Looking at the screen
+
+Ask *what do you see* and the assistant takes one picture rather than asking
+you to describe your desktop. With more than one monitor it asks which one
+first, as buttons on the island: **this screen** (the one your pointer is on),
+each of the others by name, or **all of them**.
+
+That question is worth asking. Everything sent to a model is scaled down to fit
+inside a box about 1568 pixels across, so one monitor arrives with its window
+titles legible while three side by side arrive as a strip in which nothing can
+be read. Your answer holds for the rest of the conversation, and a new
+conversation starts asking again. **Settings → Assistant** sets where that
+starts from - *ask me*, *the one I am on*, or *all of them* - and how much
+detail the picture keeps.
+
+Your desktop still asks before any picture is taken. Atoll does not work around
+that dialog, and there is no route to the screen that skips it.
+
 ### Long jobs
 
 A system upgrade takes a while, and you should not have to watch it. Press
@@ -219,6 +248,20 @@ your keyring, encrypted at rest and unlocked with your login; otherwise into a
 file only you can read, and the settings page says which happened.
 `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` from your environment are picked up as
 well, so a machine that is already set up needs no configuration.
+
+### The glow, and the colour of it
+
+The edge light is one fixed gradient: the assistant's colour where it leaves
+the island, easing into a second colour by the far corners, fading in when the
+panel opens and out when it closes. It does not follow the album art and its
+hue does not travel along the border - a light that changes colour with the
+music, or cycles while you read, is motion at the edge of your eye for as long
+as the assistant is open. Both colours are yours to set under **Settings →
+Assistant**, along with how bright and how wide the band is.
+
+The panel itself is white for the same reason. Everything else on the island
+picks up the colour of whatever is playing; the assistant is the one thing that
+has nothing to do with it, so it keeps one colour of its own.
 
 Turn the whole thing off with **Settings → Assistant → Assistant**, and the
 long press, the glow and every line of it go away.
@@ -266,7 +309,9 @@ atollctl text drive-harddisk "Backup finished"
 atollctl progress cloud-upload 64 "Uploading"
 atollctl share ~/Pictures/holiday.jpg
 atollctl ask "why is my laptop fan so loud"
-atollctl screenshot
+atollctl screenshot DP-1
+atollctl screens
+atollctl choose "Which editor should I set up?" "Kate" "Neovim"
 atollctl toggle
 atollctl settings
 ```
@@ -274,7 +319,15 @@ atollctl settings
 `atollctl screenshot` asks the desktop for one picture of the screen, writes it
 where the assistant can open it and prints the path. It is also how the
 assistant looks at the screen itself, so a question like *what do you see* is
-answered rather than turned back into a request for a screenshot.
+answered rather than turned back into a request for a screenshot. Name an
+output to take that one, `all` for every screen in one picture, or leave it out
+and the island asks which one you meant. `atollctl screens` lists what there is
+to choose between.
+
+`atollctl choose` puts a question on the island as buttons and prints back the
+one that was tapped, or a line starting `error:` if the question was closed.
+It is how the assistant asks you something when it is running as the
+command-line client, and it works just as well from a script of your own.
 
 ```sh
 atollctl assistant           # open it with an empty box

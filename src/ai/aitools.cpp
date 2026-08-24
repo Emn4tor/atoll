@@ -124,7 +124,9 @@ AiToolbox::AiToolbox(Config *config, QObject *parent)
     connect(m_capture, &ScreenCapture::captured, this, [this](const QByteArray &png) {
         AiToolResult result;
         result.id = m_pending;
-        result.content = u"Here is the current screen."_s;
+        result.content = m_captured.isEmpty() || m_captured == u"all"_s
+            ? u"Here is the current screen."_s
+            : u"Here is %1, as it is right now."_s.arg(ScreenCapture::labelFor(m_captured));
         result.image = png;
         result.imageMediaType = u"image/png"_s;
         m_pending.clear();
@@ -160,7 +162,10 @@ Rules that matter:
   loop on the same failing command.
 - When you install or change something, say afterwards what changed, in plain
   words. Assume the person does not know what a daemon is.
-- If a request is unclear, ask one short question instead of guessing.
+- If a request is unclear, ask one short question instead of guessing. When the
+  answer is a choice between a few things, use ask_user: there is no keyboard in
+  front of the person, only the island, and ask_user turns the answers into
+  buttons on it. Never write "would you like a or b?" into an answer.
 - You cannot see the screen unless you take a screenshot or the user attached
   one. Do not pretend to.
 
@@ -225,13 +230,41 @@ To remember something about this person for next time, append a line to %1.
     // it may. So the way to look is spelled out, and asking instead is ruled
     // out in as many words.
     const QString atollctl = QStandardPaths::findExecutable(u"atollctl"_s);
+    if (!atollctl.isEmpty()) {
+        // The client has no way of its own to put a button in front of
+        // somebody, and a question typed into a panel that has no keyboard on
+        // it is a question nobody can answer.
+        prompt += u"\nWhen you would ask the user to choose between a few things, do not write the "
+                  "question into your answer: run `%1 choose \"the question\" \"first answer\" "
+                  "\"second answer\"` - up to five answers, the one you would recommend first. "
+                  "The buttons appear on the island and the command prints back the one they "
+                  "tapped, or a line starting \"error:\" if they closed it. Give it a long "
+                  "timeout - it waits for a person, and people take longer than commands do.\n"_s
+                      .arg(atollctl);
+    }
+
     if (screenshotAllowed && !atollctl.isEmpty()) {
+        const QVariantList outputs = ScreenCapture::outputs();
+        QString screens;
+        if (outputs.size() > 1) {
+            QStringList named;
+            for (const QVariant &entry : outputs) {
+                const QVariantMap output = entry.toMap();
+                named.append(u"%1 (%2x%3)"_s.arg(output.value(u"name"_s).toString())
+                                 .arg(output.value(u"width"_s).toInt())
+                                 .arg(output.value(u"height"_s).toInt()));
+            }
+            screens = u" This machine has several screens: %1. `%2 screenshot` on its own asks the "
+                      "user which one they mean; `%2 screenshot DP-1` takes that one; `%2 "
+                      "screenshot all` takes every screen in one picture, which is usually too "
+                      "small to read anything on."_s.arg(named.join(u", "_s), atollctl);
+        }
         prompt += u"\nWhen the question is about what is on the screen - \"what do you see\", "
                   "\"what is this window\", \"why does this look wrong\" - look for yourself: run "
                   "`%1 screenshot`, which prints the path of a PNG, and then open that path to see "
                   "it. The user is asked once before the picture is taken. Never tell them to take "
-                  "a screenshot or to send you one; fetching it is your job, not theirs.\n"_s
-                      .arg(atollctl);
+                  "a screenshot or to send you one; fetching it is your job, not theirs.%2\n"_s
+                      .arg(atollctl, screens);
     } else {
         prompt += u"\nYou cannot see the screen: looking at it is switched off in Atoll's "
                   "settings. If you are asked what is on it, say that plainly - do not ask for a "
@@ -309,12 +342,50 @@ QJsonArray AiToolbox::definitions(bool screenshotAllowed)
                       {u"target"_s}));
 
     if (screenshotAllowed) {
-        tools.append(tool(u"take_screenshot"_s,
-                          u"Take one picture of the screen and look at it. Use this when the question "
-                          "is about something the user can see."_s,
-                          QJsonObject{},
-                          {}));
+        QString description =
+            u"Take one picture of the screen and look at it. Use this when the question is about "
+            "something the user can see."_s;
+        const QVariantList outputs = ScreenCapture::outputs();
+        QJsonObject properties;
+        if (outputs.size() > 1) {
+            QStringList named;
+            for (const QVariant &entry : outputs) {
+                const QVariantMap output = entry.toMap();
+                named.append(u"%1 (%2x%3)"_s.arg(output.value(u"name"_s).toString())
+                                 .arg(output.value(u"width"_s).toInt())
+                                 .arg(output.value(u"height"_s).toInt()));
+            }
+            // One screen at a time, and said plainly: everything sent is scaled
+            // to fit a box about 1568 pixels across, so three monitors in one
+            // picture is a picture with nothing legible on it.
+            description += u" This machine has several screens: %1. Ask for one of them by name, "
+                           "or leave `screen` out and the user will be asked which one they mean. "
+                           "Only pass \"all\" if the question is genuinely about the whole desk - "
+                           "a picture of every screen at once is too small to read."_s
+                               .arg(named.join(u", "_s));
+            properties.insert(u"screen"_s,
+                              str(u"The output to look at, e.g. \"DP-1\". Omit it to let the user "
+                                  "pick, or pass \"all\" for every screen at once."_s));
+        }
+        tools.append(tool(u"take_screenshot"_s, description, properties, {}));
     }
+
+    // A question the user answers with a tap. It is the difference between an
+    // assistant that stops halfway through a job to write "would you like a
+    // or b?" into a panel with no way to say either, and one that puts a or b
+    // on the island as two buttons.
+    tools.append(tool(u"ask_user"_s,
+                      u"Put a short question to the user with two to five answers, shown as buttons "
+                      "on the island. The answer they tap comes back as the result. Use this "
+                      "whenever you would otherwise ask them to choose in prose - which of several "
+                      "ways to do something, which file, whether to go ahead - because there is no "
+                      "keyboard in front of them at that moment, only the island. Keep the question "
+                      "to one line and the answers to a few words each."_s,
+                      QJsonObject{{u"question"_s, str(u"One line, in plain language."_s)},
+                                  {u"options"_s,
+                                   stringArray(u"Two to five short answers. Put the one you would "
+                                               "recommend first."_s)}},
+                      {u"question"_s, u"options"_s}));
 
     tools.append(tool(u"notify"_s,
                       u"Show a short message on the island. Use it to report that a long job in the "
@@ -500,7 +571,9 @@ void AiToolbox::execute(const AiToolCall &call, AiRisk risk)
     }
     if (call.name == u"take_screenshot"_s) {
         m_pending = call.id;
-        m_capture->capture();
+        m_captured = call.input.value(u"screen"_s).toString();
+        m_capture->setMaxEdge(m_config->value(u"ai.screenshotMaxEdge"_s, 1568).toInt());
+        m_capture->capture(call.input.value(u"screen"_s).toString());
         return;
     }
     if (call.name == u"install_packages"_s) {

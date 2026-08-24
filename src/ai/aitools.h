@@ -76,4 +76,6 @@ private:
     ScreenCapture *m_capture = nullptr;
     /** The call a running command belongs to. */
     QString m_pending;
+    /** Which output the picture being taken is of, for the line that goes with it. */
+    QString m_captured;
 };

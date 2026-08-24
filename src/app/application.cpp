@@ -102,6 +102,10 @@ Application::Application(QObject *parent)
     // rather than asking the user to describe it - arrives the same way.
     connect(m_ipc, &IpcService::screenCaptureRequested, m_ai, &AiService::captureScreenFor);
     connect(m_ai, &AiService::screenCaptureAnswered, m_ipc, &IpcService::answerScreenCapture);
+    // `atollctl choose` - the client's only way of putting a question where the
+    // user can actually answer it, which is on the island as buttons.
+    connect(m_ipc, &IpcService::userChoiceRequested, m_ai, &AiService::askUserFor);
+    connect(m_ai, &AiService::userChoiceAnswered, m_ipc, &IpcService::answerUserChoice);
 
     // Whatever the assistant wants to say when nobody is looking at it goes
     // out through the island's own OSD, not through a desktop notification.

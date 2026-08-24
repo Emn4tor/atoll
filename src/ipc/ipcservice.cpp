@@ -4,6 +4,8 @@
  */
 #include "ipcservice.h"
 
+#include "ai/screencapture.h"
+
 #include <QCoreApplication>
 #include <QDBusConnection>
 #include <QUuid>
@@ -107,13 +109,38 @@ QString IpcService::reviewToolCall(const QString &payload)
     return {};
 }
 
-QString IpcService::captureScreen()
+QString IpcService::captureScreen(const QString &screen)
 {
     if (!calledFromDBus()) {
         return {};
     }
-    Q_EMIT screenCaptureRequested(park(u"shot"_s));
+    Q_EMIT screenCaptureRequested(park(u"shot"_s), screen);
     return {};
+}
+
+QString IpcService::askUser(const QString &question, const QStringList &options)
+{
+    if (!calledFromDBus()) {
+        return {};
+    }
+    Q_EMIT userChoiceRequested(park(u"ask"_s), question, options);
+    return {};
+}
+
+QString IpcService::listScreens()
+{
+    // Straight from the windowing system: this is a fact about the machine,
+    // not about the assistant, and nothing here has to be asked of anybody.
+    QStringList lines;
+    const QVariantList outputs = ScreenCapture::outputs();
+    for (const QVariant &entry : outputs) {
+        const QVariantMap output = entry.toMap();
+        lines.append(u"%1 %2x%3%4"_s.arg(output.value(u"name"_s).toString())
+                         .arg(output.value(u"width"_s).toInt())
+                         .arg(output.value(u"height"_s).toInt())
+                         .arg(output.value(u"primary"_s).toBool() ? u" (main)"_s : QString()));
+    }
+    return lines.join(u'\n');
 }
 
 void IpcService::answerToolReview(const QString &token, const QString &verdictJson)
@@ -122,6 +149,11 @@ void IpcService::answerToolReview(const QString &token, const QString &verdictJs
 }
 
 void IpcService::answerScreenCapture(const QString &token, const QString &result)
+{
+    sendReply(token, result);
+}
+
+void IpcService::answerUserChoice(const QString &token, const QString &result)
 {
     sendReply(token, result);
 }

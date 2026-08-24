@@ -72,17 +72,34 @@ public Q_SLOTS:
      * Take one picture of the screen and answer with the path it was written
      * to, or with a line starting "error:".
      *
-     * There is deliberately no argument. Where the file lands is Atoll's
-     * decision, because a caller that could name the path could hand a
-     * screenshot's worth of bytes to any file the session can write.
+     * The screen may be named - `screen` is an output, "all", or "current" -
+     * but the path is not: where the file lands is Atoll's decision, because a
+     * caller that could name it could hand a screenshot's worth of bytes to
+     * any file the session can write. An empty name on a machine with several
+     * outputs puts the question to the user instead of guessing.
      */
-    Q_SCRIPTABLE QString captureScreen();
+    Q_SCRIPTABLE QString captureScreen(const QString &screen);
+
+    /**
+     * Put a question with up to five answers on the island and reply with the
+     * one the user tapped, or with a line starting "error:".
+     *
+     * It exists for the assistant running as a command-line client, which can
+     * write a question into its answer but has no way to put buttons in front
+     * of anybody.
+     */
+    Q_SCRIPTABLE QString askUser(const QString &question, const QStringList &options);
+
+    /** The outputs a picture can be taken of, one per line: "DP-1 2560x1440". */
+    Q_SCRIPTABLE QString listScreens();
 
 public:
     /** Answer a review that reviewToolCall left open. */
     void answerToolReview(const QString &token, const QString &verdictJson);
     /** Answer a picture that captureScreen left open. */
     void answerScreenCapture(const QString &token, const QString &result);
+    /** Answer a question that askUser left open. */
+    void answerUserChoice(const QString &token, const QString &result);
     /** Whether anything is still waiting for an answer. */
     bool hasOpenReviews() const
     {
@@ -104,7 +121,9 @@ Q_SIGNALS:
     /** A tool call is waiting for a verdict; answer it with `token`. */
     void toolReviewRequested(const QString &payload, const QString &token);
     /** Somebody is waiting for a picture of the screen. */
-    void screenCaptureRequested(const QString &token);
+    void screenCaptureRequested(const QString &token, const QString &screen);
+    /** Somebody is waiting for the user to answer a question. */
+    void userChoiceRequested(const QString &token, const QString &question, const QStringList &options);
 
 private:
     /** One caller left hanging on reviewToolCall, and how to reach it. */

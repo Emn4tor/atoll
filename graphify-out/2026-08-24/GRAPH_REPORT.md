@@ -1,16 +1,16 @@
 # Graph Report - atoll  (2026-08-24)
 
 ## Corpus Check
-- 75 files · ~55,545 words
+- 75 files · ~57,053 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1547 nodes · 2951 edges · 66 communities (64 shown, 2 thin omitted)
-- Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 340 edges (avg confidence: 0.8)
+- 1558 nodes · 2987 edges · 68 communities (63 shown, 5 thin omitted)
+- Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 350 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b2b99779`
+- Built from commit: `ea57353d`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -81,18 +81,20 @@
 - ConditionalRead
 - PermissionBroker::PermissionBroker
 - devices
+- progress
+- onBusMessage
 
 ## God Nodes (most connected - your core abstractions)
-1. `AiService` - 129 edges
+1. `AiService` - 133 edges
 2. `MprisPlayer` - 86 edges
 3. `ShareService` - 81 edges
 4. `Application` - 70 edges
 5. `LyricsService` - 66 edges
-6. `ShareServer` - 47 edges
-7. `ClaudeCliProvider` - 44 edges
+6. `IpcService` - 49 edges
+7. `ShareServer` - 47 edges
 8. `ShellWindow` - 44 edges
-9. `IpcService` - 44 edges
-10. `ShareSender` - 44 edges
+9. `ShareSender` - 44 edges
+10. `ClaudeCliProvider` - 43 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `reviewToolCall` --references--> `AiRequest`  [INFERRED]
@@ -101,19 +103,19 @@
   src/ai/aiservice.h → src/ai/aiprovider.h
 - `AiService::AiService()` --calls--> `cliDetail`  [INFERRED]
   src/ai/aiservice.cpp → src/ai/aiservice.h
-- `classifyCommand` --calls--> `maxRisk()`  [INFERRED]
-  src/ai/permissionbroker.h → src/ai/aitypes.h
-- `main()` --calls--> `start`  [INFERRED]
-  src/main.cpp → src/app/application.h
+- `AiService::AiService()` --calls--> `fail`  [INFERRED]
+  src/ai/aiservice.cpp → src/ai/aiservice.h
+- `AiService::AiService()` --calls--> `setActivity`  [INFERRED]
+  src/ai/aiservice.cpp → src/ai/aiservice.h
 
 ## Import Cycles
 - None detected.
 
-## Communities (66 total, 2 thin omitted)
+## Communities (68 total, 5 thin omitted)
 
 ### Community 0 - "ShellWindow"
-Cohesion: 0.06
-Nodes (68): Layer, Config, Config, QObject, QQuickWindow, QSize, QString, QVariantList (+60 more)
+Cohesion: 0.07
+Nodes (58): Layer, QTcpServer, QObject, QPointer, QVariantList, QHash, QProcess, Config (+50 more)
 
 ### Community 1 - "LyricsService"
 Cohesion: 0.06
@@ -121,11 +123,11 @@ Nodes (62): Config, Config, MprisManager, qint64, QObject, QString, QVariantList
 
 ### Community 2 - "AiService"
 Cohesion: 0.04
-Nodes (51): PendingReview, AiService, activityChanged, answerChanged, cliChanged, configurationChanged, conversationChanged, focusRequested (+43 more)
+Nodes (60): PendingReview, QQueue, AiService, activityChanged, answerChanged, cliChanged, configurationChanged, conversationChanged (+52 more)
 
 ### Community 3 - "ClaudeCliProvider"
 Cohesion: 0.06
-Nodes (58): candidatePaths(), ClaudeCliProvider, abort, arguments, busy, ClaudeCliProvider::ClaudeCliProvider(), consume, describe (+50 more)
+Nodes (57): candidatePaths(), ClaudeCliProvider, abort, arguments, busy, ClaudeCliProvider::ClaudeCliProvider(), consume, describe (+49 more)
 
 ### Community 4 - "AiToolbox"
 Cohesion: 0.09
@@ -137,11 +139,11 @@ Nodes (38): Q_OBJECT, qint64, QObject, QTimer, MprisPlayer, artChanged, capabili
 
 ### Community 6 - "IpcService"
 Cohesion: 0.07
-Nodes (42): OpenReview, QDBusContext, QObject, QString, QStringList, QHash, QObject, QString (+34 more)
+Nodes (47): OpenReview, QDBusContext, QObject, QString, QStringList, QHash, QObject, QString (+39 more)
 
 ### Community 7 - "ShareSender"
-Cohesion: 0.07
-Nodes (42): QNetworkReply, QList, QNetworkRequest, QObject, QString, ShareCredentials, Q_OBJECT, QHash (+34 more)
+Cohesion: 0.06
+Nodes (46): QNetworkReply, QList, QList, QNetworkRequest, QObject, QString, ShareCredentials, Q_OBJECT (+38 more)
 
 ### Community 8 - "ShareService"
 Cohesion: 0.05
@@ -153,7 +155,7 @@ Nodes (36): Config, Config, QList, QObject, Q_OBJECT, QByteArray, QList, QObject
 
 ### Community 10 - "Application"
 Cohesion: 0.07
-Nodes (30): Application, busTapChanged, create, m_ai, m_battery, m_busError, m_busTapActive, m_clock (+22 more)
+Nodes (28): Application, adjustVolume, busTapChanged, islandRunning, m_ai, m_battery, m_busError, m_busTapActive (+20 more)
 
 ### Community 11 - "DBusMessageInfo"
 Cohesion: 0.07
@@ -168,8 +170,8 @@ Cohesion: 0.11
 Nodes (30): MprisPlayer, Config, Config, QObject, QString, QVariantList, Q_OBJECT, QList (+22 more)
 
 ### Community 14 - "aiservice.cpp"
-Cohesion: 0.13
-Nodes (31): send, activeBackend, ask, bringToFront, busy, cliDetail, cliInstallCommand, cliState (+23 more)
+Cohesion: 0.10
+Nodes (21): allowEverything, bringToFront, busy, cliDetail, cliInstallCommand, cliState, continueInBackground, dismiss (+13 more)
 
 ### Community 15 - "Battery"
 Cohesion: 0.09
@@ -192,8 +194,8 @@ Cohesion: 0.12
 Nodes (23): QMutex, QPixmap, QQuickImageProvider, QColor, QImage, QSize, QString, QHash (+15 more)
 
 ### Community 20 - "NotificationModel"
-Cohesion: 0.09
-Nodes (24): QAbstractListModel, QModelIndex, Config, QByteArray, QHash, QVariant, QVariantMap, Q_OBJECT (+16 more)
+Cohesion: 0.11
+Nodes (21): QAbstractListModel, QModelIndex, Config, QVariant, QVariantMap, Q_OBJECT, QList, NotificationModel (+13 more)
 
 ### Community 21 - "shareserver.cpp"
 Cohesion: 0.17
@@ -204,24 +206,24 @@ Cohesion: 0.11
 Nodes (23): AiProvider, abort, AiProvider::AiProvider(), buildBody, buildRequest, busy, consume, describeHttpError (+15 more)
 
 ### Community 23 - "OsdMonitor"
-Cohesion: 0.10
-Nodes (16): Config, DBusMessageInfo, Q_OBJECT, QObject, QString, OsdMonitor, dismissed, m_config (+8 more)
+Cohesion: 0.08
+Nodes (29): start, Config, Config, DBusMessageInfo, QObject, QString, QStringList, DBusMessageInfo (+21 more)
 
 ### Community 24 - "shareservice.cpp"
-Cohesion: 0.18
-Nodes (22): qreal, Config, QObject, QString, defaultAlias(), configure, dataDirectory, destination (+14 more)
+Cohesion: 0.21
+Nodes (20): Config, QObject, QString, defaultAlias(), configure, dataDirectory, destination, dismiss (+12 more)
 
 ### Community 25 - "mprisplayer.cpp"
-Cohesion: 0.17
-Nodes (21): qint64, QObject, QString, QVariantList, call, fetchAll, iconName, MprisPlayer::MprisPlayer() (+13 more)
+Cohesion: 0.16
+Nodes (23): qint64, QNetworkAccessManager, QObject, QString, QVariantList, call, fetchAll, iconName (+15 more)
 
 ### Community 26 - "NotificationData"
 Cohesion: 0.09
 Nodes (22): QColor, QDateTime, QString, QStringList, NotificationData, accent, actions, appIcon (+14 more)
 
 ### Community 27 - "application.cpp"
-Cohesion: 0.14
-Nodes (20): QUrl, activateApp, adjustVolume, Application::Application(), copyText, debugState, debugSurface, instance (+12 more)
+Cohesion: 0.13
+Nodes (20): QUrl, activateApp, Application::Application(), copyText, create, debugState, debugSurface, instance (+12 more)
 
 ### Community 28 - "Atoll"
 Cohesion: 0.10
@@ -236,16 +238,16 @@ Cohesion: 0.16
 Nodes (20): QObject, QString, QVariantMap, uint, Q_OBJECT, QObject, portalService(), ScreenCapture (+12 more)
 
 ### Community 31 - "setState"
-Cohesion: 0.21
-Nodes (20): addStep, advanceQueue, AiService::AiService(), allow, answerReview, cancel, deny, executeNow (+12 more)
+Cohesion: 0.26
+Nodes (15): addStep, advanceQueue, AiService::AiService(), allow, answerReview, cancel, deny, executeNow (+7 more)
 
 ### Community 32 - "CommandRunner"
 Cohesion: 0.15
 Nodes (17): Job, Q_SIGNALS, CommandRunner, cancelAll, collect, CommandRunner::CommandRunner(), condense, finished (+9 more)
 
 ### Community 33 - "Clock"
-Cohesion: 0.13
-Nodes (16): Clock, Clock::Clock(), date, m_config, m_timer, QML_ELEMENT, scheduleNext, tick (+8 more)
+Cohesion: 0.12
+Nodes (18): QTimer, Clock, Clock::Clock(), date, m_config, m_timer, QML_ELEMENT, scheduleNext (+10 more)
 
 ### Community 34 - "NotificationMonitor"
 Cohesion: 0.11
@@ -264,8 +266,8 @@ Cohesion: 0.16
 Nodes (14): aiRiskName(), AiToolCall, id, input, name, AiVerdict, detail, grantKey (+6 more)
 
 ### Community 38 - "PermissionBroker"
-Cohesion: 0.15
-Nodes (15): QSet, Config, AiRisk, Q_OBJECT, QObject, QSet, QString, PermissionBroker (+7 more)
+Cohesion: 0.12
+Nodes (17): QSet, Config, AiRisk, Q_OBJECT, QObject, QSet, QString, PermissionBroker (+9 more)
 
 ### Community 39 - "LockMonitor"
 Cohesion: 0.18
@@ -292,12 +294,12 @@ Cohesion: 0.15
 Nodes (11): AiTurn, image, imageMediaType, rawContent, rawProvider, role, text, toolCalls (+3 more)
 
 ### Community 45 - "QObject"
-Cohesion: 0.25
-Nodes (6): QObject, QVariantList, QHash, QQuickWindow, QStringList, QColor
+Cohesion: 0.13
+Nodes (20): QString, LockscreenOverlay, allow, available, m_overlay, m_reason, m_resolved, resolve (+12 more)
 
 ### Community 46 - "osdmonitor.cpp"
-Cohesion: 0.23
-Nodes (13): start, Config, DBusMessageInfo, QObject, QString, QStringList, emitEvent, handleMessage (+5 more)
+Cohesion: 0.25
+Nodes (18): send, activeBackend, ask, captureScreenFor, configured, engage, fail, model (+10 more)
 
 ### Community 47 - "GeminiProvider"
 Cohesion: 0.18
@@ -308,28 +310,24 @@ Cohesion: 0.37
 Nodes (12): argumentsOf(), QString, QStringList, isAdminProgram(), isForbiddenProgram(), isSecretPath(), classify, classifyCommand (+4 more)
 
 ### Community 49 - "resolveArt"
-Cohesion: 0.19
-Nodes (13): QNetworkAccessManager, QStringList, QVariant, QVariantMap, demarshall(), applyMetadata, applyPlayerProperties, applyRootProperties (+5 more)
+Cohesion: 0.24
+Nodes (11): QStringList, QVariant, QVariantMap, demarshall(), applyMetadata, applyPlayerProperties, applyRootProperties, onPropertiesChanged (+3 more)
 
 ### Community 50 - "notificationmodel.cpp"
-Cohesion: 0.29
-Nodes (12): Config, QObject, QString, quint32, quint64, close, dismiss, indexOfUid (+4 more)
-
-### Community 51 - "shareserver.h"
-Cohesion: 0.18
-Nodes (9): QTcpServer, QList, QPointer, QProcess, ShareCredentials, QFile, QNetworkAccessManager, QNetworkReply (+1 more)
+Cohesion: 0.22
+Nodes (15): Config, QByteArray, QHash, QObject, QString, quint32, quint64, close (+7 more)
 
 ### Community 52 - "ShareFile"
-Cohesion: 0.18
-Nodes (12): QList, QStringList, collect, offer, offerPaths, qint64, ShareFile, id (+4 more)
+Cohesion: 0.29
+Nodes (7): qint64, ShareFile, id, mimeType, name, path, size
 
 ### Community 53 - "QTimer"
-Cohesion: 0.20
-Nodes (8): QTimer, QDateTime, Config, QNetworkAccessManager, ShareDiscovery, ShareSender, ShareServer, Config
+Cohesion: 0.33
+Nodes (5): Config, QNetworkAccessManager, ShareDiscovery, ShareSender, ShareServer
 
 ### Community 55 - "aiservice.h"
-Cohesion: 0.20
-Nodes (9): QQueue, AiToolbox, AnthropicProvider, ClaudeCliProvider, Config, CredentialStore, GeminiProvider, PermissionBroker (+1 more)
+Cohesion: 0.50
+Nodes (5): QList, QStringList, collect, offer, offerPaths
 
 ### Community 56 - "QVariantMap"
 Cohesion: 0.25
@@ -348,8 +346,8 @@ Cohesion: 0.29
 Nodes (7): AiToolResult, content, id, image, imageMediaType, isError, QByteArray
 
 ### Community 60 - "sharecredentials.cpp"
-Cohesion: 0.67
-Nodes (5): QString, ShareCredentials, mint(), read(), ShareCredentials::load()
+Cohesion: 0.27
+Nodes (7): QColor, QDateTime, QString, ShareCredentials, mint(), read(), ShareCredentials::load()
 
 ### Community 61 - "atollctl"
 Cohesion: 0.83
@@ -368,24 +366,24 @@ Cohesion: 0.67
 Nodes (3): Config, QObject, PermissionBroker::PermissionBroker()
 
 ## Knowledge Gaps
-- **467 isolated node(s):** `role`, `text`, `toolCalls`, `toolResults`, `image` (+462 more)
+- **468 isolated node(s):** `role`, `text`, `toolCalls`, `toolResults`, `image` (+463 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **2 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **5 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `AiService` connect `AiService` to `AiToolCall`, `LockMonitor`, `application.cpp`, `Application`, `AiTurn`, `QObject`, `aiservice.cpp`, `aiservice.h`, `AiToolResult`, `setState`?**
-  _High betweenness centrality (0.195) - this node is a cross-community bridge._
-- **Why does `ShareService` connect `ShareService` to `devices`, `SharePeer`, `IpcService`, `LockMonitor`, `ShareIdentity`, `Application`, `ShareFile`, `QTimer`, `shareservice.cpp`, `application.cpp`?**
-  _High betweenness centrality (0.156) - this node is a cross-community bridge._
+- **Why does `AiService` connect `AiService` to `ShellWindow`, `AiToolCall`, `LockMonitor`, `application.cpp`, `Application`, `AiTurn`, `aiservice.cpp`, `osdmonitor.cpp`, `shareserver.h`, `AiToolResult`, `setState`?**
+  _High betweenness centrality (0.189) - this node is a cross-community bridge._
+- **Why does `ShareService` connect `ShareService` to `devices`, `progress`, `SharePeer`, `LockMonitor`, `ShareIdentity`, `Application`, `ShareFile`, `QTimer`, `aiservice.h`, `shareservice.cpp`, `application.cpp`?**
+  _High betweenness centrality (0.146) - this node is a cross-community bridge._
 - **Why does `QML_UNCREATABLE` connect `LockMonitor` to `ShellWindow`, `LyricsService`, `AiService`, `Clock`, `MprisPlayer`, `IpcService`, `ShareService`, `Visualizer`, `Config`, `MprisManager`, `Battery`, `OsdMonitor`?**
   _High betweenness centrality (0.115) - this node is a cross-community bridge._
 - **What connects `role`, `text`, `toolCalls` to the rest of the system?**
-  _467 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _468 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `ShellWindow` be split into smaller, more focused modules?**
-  _Cohesion score 0.05837837837837838 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.07146087743102668 - nodes in this community are weakly interconnected._
 - **Should `LyricsService` be split into smaller, more focused modules?**
-  _Cohesion score 0.0579476861167002 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.05672926447574335 - nodes in this community are weakly interconnected._
 - **Should `AiService` be split into smaller, more focused modules?**
-  _Cohesion score 0.03571428571428571 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.035096153846153846 - nodes in this community are weakly interconnected._

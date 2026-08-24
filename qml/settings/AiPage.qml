@@ -208,6 +208,35 @@ SettingsPage {
             defaultValue: true
         }
 
+        ChoiceSetting {
+            label: qsTr("Which screen it looks at")
+            description: qsTr("With more than one monitor, asking is usually right: everything sent is "
+                              + "scaled down to fit, so one screen is legible where all of them at once "
+                              + "is not. This is only the starting point - the assistant asks on the "
+                              + "island, and your answer holds for that conversation.")
+            key: "ai.screen"
+            defaultValue: "ask"
+            visible: App.ai.severalScreens
+            options: [
+                { value: "ask", label: qsTr("Ask me") },
+                { value: "current", label: qsTr("The one I am on") },
+                { value: "all", label: qsTr("All of them") }
+            ]
+        }
+
+        NumberSetting {
+            label: qsTr("Screenshot detail")
+            description: qsTr("The longest edge of the picture, in pixels. 1568 is as much as the "
+                              + "services keep; more only costs upload, less loses small text.")
+            key: "ai.screenshotMaxEdge"
+            defaultValue: 1568
+            from: 640
+            to: 2560
+            step: 64
+            enabled: Cfg.get("ai.allowScreenshots", true)
+            opacity: enabled ? 1 : 0.45
+        }
+
         NumberSetting {
             label: qsTr("Give up on a command after")
             description: qsTr("Seconds. A system upgrade needs more than a directory listing does.")
@@ -259,6 +288,24 @@ SettingsPage {
             step: 10
             enabled: Cfg.get("ai.glow", true)
             opacity: enabled ? 1 : 0.45
+        }
+
+        ColorSetting {
+            label: qsTr("Glow colour")
+            description: qsTr("At the island. The light does not follow the music: it is this colour "
+                              + "every time the assistant opens, and it stays that colour until it closes.")
+            key: "ai.glowColor"
+            defaultValue: "#5aa2ff"
+            presets: ["#5aa2ff", "#8f5bff", "#4ad9c8", "#ff8f4a", "#ffffff"]
+        }
+
+        ColorSetting {
+            label: qsTr("Glow colour, far corners")
+            description: qsTr("What it fades into by the other end of the screen. Set it to the same "
+                              + "colour for one flat shade.")
+            key: "ai.glowColorFar"
+            defaultValue: "#8f5bff"
+            presets: ["#8f5bff", "#5aa2ff", "#4ad9c8", "#ff4a8f", "#ffffff"]
         }
 
         BoolSetting {

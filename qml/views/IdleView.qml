@@ -46,7 +46,9 @@ Item {
             visible: view.assistantBusy && Cfg.get("ai.avatar", true)
             size: 18
             mood: App.ai.state === "permission" ? "alert" : "working"
-            bodyColor: App.ai.state === "permission" ? Theme.critical : Theme.accent
+            // The assistant's own colour, not the album art's: it is the one
+            // thing on the pill that has nothing to do with what is playing.
+            bodyColor: App.ai.state === "permission" ? Theme.critical : Theme.assistantTint
         }
 
         AlbumArt {

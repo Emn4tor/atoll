@@ -375,12 +375,28 @@ AiVerdict PermissionBroker::classifyCommand(const QString &command) const
     // question about what is on the screen. It is worth naming: the command
     // line says nothing about what is really being asked for, and this is the
     // one the user most needs to recognise before they say yes.
-    static const QRegularExpression screenshot(u"^atollctl screenshot$"_s);
-    if (screenshot.match(flat).hasMatch()) {
+    static const QRegularExpression screenshot(u"^atollctl screenshot( [A-Za-z0-9_.:-]+)?$"_s);
+    const QRegularExpressionMatch shot = screenshot.match(flat);
+    if (shot.hasMatch()) {
+        const QString output = shot.captured(1).trimmed();
         verdict.risk = AiRisk::User;
         verdict.summary = tr("Look at your screen");
-        verdict.detail = tr("One still picture of the current screen is sent to the assistant.");
+        verdict.detail = output.isEmpty() || output == u"all"_s
+            ? tr("One still picture of the current screen is sent to the assistant.")
+            : tr("One still picture of %1 is sent to the assistant.").arg(output);
         verdict.grantKey = u"screenshot"_s;
+        return verdict;
+    }
+
+    // The island's own way of asking the user something. Nothing on the
+    // machine is touched and the user answers it themselves, so stopping them
+    // first to ask whether they may be asked would be absurd.
+    static const QRegularExpression choose(u"^atollctl choose\\b"_s);
+    if (choose.match(flat).hasMatch()) {
+        verdict.risk = AiRisk::Safe;
+        verdict.summary = tr("Ask you a question");
+        verdict.detail = tr("Buttons on the island. Nothing on this machine changes.");
+        verdict.grantKey = u"chatter"_s;
         return verdict;
     }
 
@@ -565,9 +581,12 @@ AiVerdict PermissionBroker::classify(const AiToolCall &call) const
     }
 
     if (call.name == u"take_screenshot"_s) {
+        const QString screen = call.input.value(u"screen"_s).toString();
         verdict.risk = AiRisk::User;
         verdict.summary = tr("Look at your screen");
-        verdict.detail = tr("One still picture of the current screen is sent to the assistant.");
+        verdict.detail = screen.isEmpty() || screen == u"all"_s
+            ? tr("One still picture of the current screen is sent to the assistant.")
+            : tr("One still picture of %1 is sent to the assistant.").arg(screen);
         verdict.grantKey = u"screenshot"_s;
         return verdict;
     }
@@ -589,6 +608,17 @@ AiVerdict PermissionBroker::classify(const AiToolCall &call) const
         verdict.summary = tr("Read a page from the web");
         verdict.detail = call.input.value(u"url"_s).toString();
         verdict.grantKey = u"web"_s;
+        return verdict;
+    }
+
+    // The assistant putting a question to the user is the one tool whose whole
+    // point is that the user answers it. Asking permission to ask would be one
+    // prompt too many.
+    if (call.name == u"ask_user"_s) {
+        verdict.risk = AiRisk::Safe;
+        verdict.summary = call.input.value(u"question"_s).toString();
+        verdict.detail = call.input.value(u"options"_s).toStringList().join(u" / "_s);
+        verdict.grantKey = u"chatter"_s;
         return verdict;
     }
 
