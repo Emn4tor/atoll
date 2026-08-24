@@ -142,7 +142,8 @@ QVariantMap Config::defaults()
   },
   "ai": {
     "enabled": true,
-    "provider": "anthropic",
+    "provider": "claude-cli",
+    "cliPath": "",
     "model": "",
     "effort": "high",
     "maxTokens": 16000,

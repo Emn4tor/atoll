@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include <QDBusConnection>
 #include <QDBusContext>
 #include <QDBusMessage>
 #include <QHash>
@@ -94,7 +95,10 @@ Q_SIGNALS:
 private:
     /** One caller left hanging on reviewToolCall, and how to reach it. */
     struct OpenReview {
-        QDBusConnection connection;
+        // Never used as it stands - every entry is assigned a real connection
+        // - but a hash needs to be able to hand back an empty one, and the
+        // empty one is what says "there was nothing waiting under that name".
+        QDBusConnection connection = QDBusConnection::sessionBus();
         QDBusMessage request;
     };
 

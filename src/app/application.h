@@ -154,6 +154,8 @@ public:
     /** Launch a desktop entry (used when a notification is clicked). */
     Q_INVOKABLE void activateApp(const QString &desktopEntry);
     Q_INVOKABLE void openUrl(const QString &url);
+    /** Put text on the clipboard, for the settings window's copy buttons. */
+    Q_INVOKABLE void copyText(const QString &text);
     /**
      * Open the settings window, or raise the one that is already up. `page` is
      * a page name to land on, e.g. "ai" when the island offers to set the

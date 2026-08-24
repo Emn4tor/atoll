@@ -12,7 +12,7 @@
 using namespace Qt::StringLiterals;
 
 AiProvider::AiProvider(QNetworkAccessManager *network, QObject *parent)
-    : QObject(parent)
+    : AiBackend(parent)
     , m_network(network)
 {
 }

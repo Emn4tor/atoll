@@ -1,0 +1,41 @@
+# Maintainer: jojo2k7
+#
+# The development package: builds whatever is on the default branch right now.
+# `atoll` is the one to install unless you want to follow along.
+pkgname=atoll-git
+pkgver=r1.0000000
+pkgrel=1
+pkgdesc="A dynamic island for KDE Plasma (development version)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/atoll-shell/atoll"
+license=('GPL-3.0-or-later')
+depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'layer-shell-qt' 'kcoreaddons' 'ki18n' 'dbus' 'wayland')
+makedepends=('git' 'cmake' 'ninja' 'qt6-shadertools' 'extra-cmake-modules' 'wayland')
+optdepends=('claude-code: the assistant, signed in with your own account instead of an API key'
+            'cava: real spectrum analysis instead of the synthetic one'
+            'wireplumber: volume control from the island'
+            'kde-cli-tools: launching apps from notifications'
+            'polkit: let the assistant ask for administrator rights'
+            'polkit-kde-agent: the dialog that asks for them, on Plasma'
+            'libsecret: keep an assistant API key in your keyring instead of a file'
+            'xdg-desktop-portal-kde: let the assistant look at your screen')
+provides=('atoll')
+conflicts=('atoll')
+source=("git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$srcdir/atoll"
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+    cmake -S atoll -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr
+    cmake --build build
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+}

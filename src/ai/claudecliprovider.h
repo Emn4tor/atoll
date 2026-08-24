@@ -136,11 +136,9 @@ private:
     QByteArray m_errors;
     CliStatus m_status;
     QString m_configuredPath;
-    /** What the running process was started with, so a change can restart it. */
+    /** The model the running process was started with, so a change can restart it. */
     QString m_startedModel;
-    QString m_startedPrompt;
     bool m_turnInFlight = false;
-    bool m_stopping = false;
     /** tool_use ids already reported, because a block can be seen twice. */
     QSet<QString> m_announced;
 };

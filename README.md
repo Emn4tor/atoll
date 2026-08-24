@@ -76,15 +76,34 @@ whatever Plasma has there. All three parts of that are settings.
 
 ## Installing
 
+### Arch, in one go
+
+```sh
+git clone https://github.com/atoll-shell/atoll.git
+cd atoll
+./scripts/install.sh
+```
+
+That installs what is missing, builds, installs into `/usr` and starts the
+island as a user service, so it comes back with every login. It asks before it
+installs the optional extras, and the only step it runs as root is the install
+itself.
+
+From the AUR, once it is published there: `yay -S atoll` for a release, or
+`yay -S atoll-git` to follow the development branch. Both PKGBUILDs live in
+[`packaging/`](packaging).
+
+### By hand
+
 Dependencies: `qt6-base qt6-declarative qt6-svg layer-shell-qt kcoreaddons ki18n dbus wayland`,
 plus `cmake ninja qt6-shadertools extra-cmake-modules wayland` to build
 (`wayland-scanner` generates the lock-screen protocol; without it everything
 else still builds).
-Optional: `cava` for a real spectrum, `wireplumber` for volume control,
-`openssl` for encrypted sharing (see [Sharing files](#sharing-files)),
-`polkit` and a polkit agent so the assistant can ask for administrator rights,
-`libsecret` to keep its API key in your keyring, and
-`xdg-desktop-portal-kde` to let it look at your screen.
+Optional: `claude-code` for the assistant, `cava` for a real spectrum,
+`wireplumber` for volume control, `openssl` for encrypted sharing (see
+[Sharing files](#sharing-files)), `polkit` and a polkit agent so the assistant
+can ask for administrator rights, `libsecret` to keep an API key in your
+keyring, and `xdg-desktop-portal-kde` to let it look at your screen.
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
@@ -92,13 +111,15 @@ cmake --build build
 sudo cmake --install build
 ```
 
-On Arch there is a `packaging/PKGBUILD`.
-
 Start it with `atoll`, or enable the bundled user service:
 
 ```sh
 systemctl --user enable --now atoll.service
 ```
+
+Two things are worth doing from an installed copy rather than a build
+directory: the lock screen (see [below](#on-the-lock-screen)) and the
+assistant, whose permission gate is the installed binary itself.
 
 ## The assistant
 
@@ -126,6 +147,11 @@ looks at what the action would actually do:
 | **Changes your session** | Writing in your home directory, changing a Plasma setting, opening an app | Asks. You can allow it once, or for the rest of the session. |
 | **Administrator** | Installing packages, a system upgrade, anything as root | Asks every time, and then **your desktop** asks — the ordinary polkit dialog, which honours a password, a fingerprint or a hardware key exactly as it does everywhere else. |
 
+That gate is the same one however the assistant is connected. When the answer
+comes from the Claude Code client, the client carries out its own tool calls -
+so Atoll stops each one before it happens, asks here, and tells the client what
+you said. A refusal reaches the model as an answer, and it moves on.
+
 The point of that middle column is that a model asking nicely for root does not
 get it. If the work fits inside your own account, that is where it runs.
 Atoll never sees, stores or types your password, and a handful of operations —
@@ -148,18 +174,38 @@ by itself.
 
 ### Connecting it
 
-Atoll talks to Claude or Gemini directly. There is no Atoll account and no
-server in between: your question goes from your machine to the provider you
-picked, and nowhere else.
+There is no Atoll account and no server in between. Your question goes from
+your machine to whichever service you picked, and nowhere else.
 
 Hold the island before you have set one up and it offers to open the settings
-for you. There you paste an API key from
-[console.anthropic.com](https://console.anthropic.com) or
-[aistudio.google.com](https://aistudio.google.com). If `libsecret` is installed
-the key goes into your keyring, encrypted at rest and unlocked with your login;
-otherwise into a file only you can read, and the settings page says which
-happened. `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` from your environment are
-picked up as well, so a machine that is already set up needs no configuration.
+for you. Under **Settings → Assistant** there are three ways in:
+
+| | What it needs | Where the answer comes from |
+|---|---|---|
+| **Claude Code** | An account you sign in to once | The `claude` client on this machine, using your subscription |
+| **Claude API** | A key from [console.anthropic.com](https://console.anthropic.com) | Anthropic, billed per question |
+| **Gemini** | A key from [aistudio.google.com](https://aistudio.google.com) | Google, billed per question |
+
+**Claude Code is the default**, because it is the one with nothing to set up:
+no billing page to find, no key to create, nothing to paste. If the client is
+missing, the settings page shows the one command that installs it; if it is
+installed but signed out, the **Sign in** button opens a terminal on
+`claude auth login` and you are done after that. Atoll then runs the client for
+each question and reads the answer back onto the island.
+
+The client is run deliberately narrowly. It is started with none of its own
+configuration — no project instructions, no plugins, no skills, no saved
+transcript — because the assistant on your island should behave the same on
+every machine, and a question asked on a pill does not belong in a log you did
+not ask for. What it *is* given is Atoll's own instructions and a gate: every
+tool call it wants to make stops at the island first, where the same rules and
+the same dialog decide it as for every other way of connecting.
+
+If you use an API key instead: with `libsecret` installed the key goes into
+your keyring, encrypted at rest and unlocked with your login; otherwise into a
+file only you can read, and the settings page says which happened.
+`ANTHROPIC_API_KEY` and `GEMINI_API_KEY` from your environment are picked up as
+well, so a machine that is already set up needs no configuration.
 
 Turn the whole thing off with **Settings → Assistant → Assistant**, and the
 long press, the glow and every line of it go away.
@@ -289,6 +335,9 @@ while you watch. Keys you are most likely to want:
 | `lyrics.enabled` | Whether to look lyrics up at all. |
 | `lyrics.offsetMs` | Shifts every lyric line, for players that report position late. |
 | `sharing.autoAccept` | Take offered files without asking first. |
+| `ai.provider` | `"claude-cli"` signs in with the Claude Code client, `"anthropic"` and `"gemini"` use an API key. |
+| `ai.cliPath` | Where that client lives, for the installs Atoll does not find by itself. |
+| `ai.permissions.mode` | `"readonly"`, `"guarded"` or `"trusted"` - the same choice as in the settings window. |
 | `lockScreen.enabled` | Whether to ask to stay visible while the session is locked. |
 
 Configs written before islands could span outputs still work: an
@@ -304,6 +353,13 @@ window under *Media and lyrics*, or with `"lyrics": { "enabled": false }`.
 
 Remote cover art is fetched from whatever URL the player advertises - that is
 the player's server, not ours.
+
+The assistant is the other way out, and only while you are asking it something:
+your question goes to the service you connected it to, and nothing goes
+anywhere while it sits idle. Connected through Claude Code, the traffic is the
+client's own - Atoll starts it, writes the question to it and reads the answer
+back - so it uses the account you signed that client in with. Turn the
+assistant off under *Settings -> Assistant* and neither path is taken at all.
 
 Sharing is local traffic only: a multicast announcement on `224.0.0.167:53317`
 and HTTP(S) straight between the two devices. Turn the whole thing off with

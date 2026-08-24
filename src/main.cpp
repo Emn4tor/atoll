@@ -4,6 +4,7 @@
  *
  * Atoll - a dynamic island for KDE Plasma.
  */
+#include "ai/permissionhook.h"
 #include "app/application.h"
 #include "app/imagestore.h"
 #include "ipc/ipcservice.h"
@@ -81,10 +82,30 @@ bool wantsSettings(int argc, char *argv[])
     }
     return false;
 }
+
+/**
+ * The permission gate runs once per tool call, so it has to start, ask and
+ * exit; it never draws anything and must not touch the display at all. Like
+ * the settings flag, that has to be known before an application object exists.
+ */
+bool wantsPermissionHook(int argc, char *argv[])
+{
+    for (int i = 1; i < argc; ++i) {
+        if (qstrcmp(argv[i], "--permission-hook") == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 }
 
 int main(int argc, char *argv[])
 {
+    if (wantsPermissionHook(argc, argv)) {
+        QCoreApplication hook(argc, argv);
+        return runPermissionHook();
+    }
+
     QGuiApplication::setDesktopSettingsAware(true);
     const bool settingsMode = wantsSettings(argc, argv);
 
@@ -127,12 +148,17 @@ int main(int argc, char *argv[])
     const QCommandLineOption askOption(u"ask"_s,
                                        u"Put a question to the assistant on the running island."_s,
                                        u"question"_s);
+    const QCommandLineOption hookOption(
+        u"permission-hook"_s,
+        u"Ask the running island to judge one tool call. Read on standard input, answered on "
+        "standard output; the assistant starts this itself."_s);
     parser.addOption(toggleOption);
     parser.addOption(expandOption);
     parser.addOption(collapseOption);
     parser.addOption(quitOption);
     parser.addOption(settingsOption);
     parser.addOption(askOption);
+    parser.addOption(hookOption);
     parser.process(app);
 
     if (!settingsMode && parser.isSet(askOption)) {

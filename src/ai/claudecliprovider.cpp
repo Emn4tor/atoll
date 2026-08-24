@@ -13,6 +13,7 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QStandardPaths>
+#include <QTimer>
 #include <QUrl>
 
 using namespace Qt::StringLiterals;
@@ -244,7 +245,6 @@ void ClaudeCliProvider::start(const AiRequest &request)
     m_buffer.clear();
     m_errors.clear();
     m_announced.clear();
-    m_stopping = false;
 
     auto *process = new QProcess(this);
     m_process = process;
@@ -264,7 +264,7 @@ void ClaudeCliProvider::start(const AiRequest &request)
         }
     });
     connect(process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        if (error != QProcess::FailedToStart || m_stopping) {
+        if (error != QProcess::FailedToStart) {
             return;
         }
         m_turnInFlight = false;
@@ -275,7 +275,7 @@ void ClaudeCliProvider::start(const AiRequest &request)
         if (m_process == process) {
             m_process = nullptr;
         }
-        if (m_stopping || !m_turnInFlight) {
+        if (!m_turnInFlight) {
             return;
         }
         // The client left in the middle of a turn, so whatever it printed on
@@ -289,17 +289,23 @@ void ClaudeCliProvider::start(const AiRequest &request)
 
     process->start();
     m_startedModel = request.model;
-    m_startedPrompt = request.systemPrompt;
 }
 
 void ClaudeCliProvider::send(const AiRequest &request)
 {
-    const bool running = m_process && m_process->state() != QProcess::NotRunning;
+    if (request.history.isEmpty() || request.history.constLast().text.trimmed().isEmpty()) {
+        Q_EMIT failed(tr("There was nothing to ask."));
+        return;
+    }
+
     // A conversation is one process: the client keeps the history, and that is
-    // what makes a follow-up question cost a question rather than a transcript.
-    // It is restarted only when the settings it was started with no longer
-    // describe what was asked for.
-    if (running && (m_startedModel != request.model || m_startedPrompt != request.systemPrompt)) {
+    // what makes a follow-up question cost a question rather than a whole
+    // transcript. Changing the model is the one thing that cannot be done
+    // without starting again - and the system prompt deliberately is not,
+    // because it carries the notes the assistant keeps about the user, and
+    // writing one down mid-conversation must not throw the conversation away.
+    const bool running = m_process && m_process->state() != QProcess::NotRunning;
+    if (running && m_startedModel != request.model) {
         abort();
     }
     if (!m_process || m_process->state() == QProcess::NotRunning) {
@@ -311,9 +317,7 @@ void ClaudeCliProvider::send(const AiRequest &request)
 
     m_turnInFlight = true;
     m_announced.clear();
-    if (!request.history.isEmpty()) {
-        writeTurn(request.history.last());
-    }
+    writeTurn(request.history.constLast());
 }
 
 void ClaudeCliProvider::writeTurn(const AiTurn &turn)
@@ -339,21 +343,24 @@ void ClaudeCliProvider::abort()
     if (!m_process) {
         return;
     }
-    m_stopping = true;
     QProcess *process = m_process;
     m_process = nullptr;
+    m_buffer.clear();
 
+    // Nothing it says from here belongs to a conversation anybody can still
+    // see, so it is cut loose rather than waited for: the island has to stay
+    // responsive while a client that is in the middle of something winds down.
+    process->disconnect(this);
+    connect(process, &QProcess::finished, process, &QObject::deleteLater);
     // Closing the input is how the client is meant to be told the conversation
     // is over; the rest is for the case where it is busy and does not notice.
     process->closeWriteChannel();
     process->terminate();
-    if (!process->waitForFinished(1500)) {
-        process->kill();
-        process->waitForFinished(500);
-    }
-    process->deleteLater();
-    m_buffer.clear();
-    m_stopping = false;
+    QTimer::singleShot(2000, process, [process] {
+        if (process->state() != QProcess::NotRunning) {
+            process->kill();
+        }
+    });
 }
 
 // ---- reading what it says ------------------------------------------------

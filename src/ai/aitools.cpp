@@ -193,6 +193,33 @@ Machine details:
     return prompt;
 }
 
+QString AiToolbox::clientAddendum()
+{
+    const QString memoryPath = QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
+                                   .filePath(u"atoll/assistant-memory.md"_s);
+
+    return uR"(
+You are running here through the Claude Code client, which means you carry out
+your own tool calls rather than handing them back. Four things follow:
+
+- Every call is put to the user on the island before it happens, and they can
+  refuse it. A refusal is an answer, not a fault: say in one line what you
+  would have needed, and stop. Never look for another route to something you
+  have just been refused.
+- Nothing you run has a terminal attached. A command that stops to ask a
+  question will hang there until it is killed, so pass whatever flag makes it
+  decide by itself - `--noconfirm` for pacman, `-y` for the others.
+- For work that genuinely needs administrator rights, run it under `pkexec`,
+  never `sudo`: pkexec asks the desktop for the password in the dialog the user
+  already knows, and sudo has nowhere to ask. Everything that fits inside the
+  user's own account should stay there.
+- You start in a working directory of Atoll's own, not the user's home, so use
+  absolute paths for everything.
+
+To remember something about this person for next time, append a line to %1.
+)"_s.arg(memoryPath);
+}
+
 QJsonArray AiToolbox::definitions(bool screenshotAllowed)
 {
     QJsonArray tools;

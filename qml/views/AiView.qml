@@ -234,7 +234,11 @@ Item {
                     text: {
                         switch (view.phase) {
                         case "setup":
-                            return qsTr("Add a key for Claude or Gemini and the island can act on this machine.")
+                            // The way in depends on which door the user is at:
+                            // one of them asks for nothing but a sign-in.
+                            return view.ai.provider === "claude-cli"
+                                   ? qsTr("Sign in once with Claude Code - no key to create - and the island can act on this machine.")
+                                   : qsTr("Add a key for Claude or Gemini and the island can act on this machine.")
                         case "permission":
                             return view.ai.pendingTier
                         case "thinking":

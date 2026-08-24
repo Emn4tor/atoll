@@ -20,7 +20,14 @@ SettingsPage {
     description: qsTr("Hold the island to ask a question. It can answer, and - with your "
                       + "permission, one step at a time - it can act on this machine.")
 
-    readonly property string provider: Cfg.get("ai.provider", "anthropic")
+    readonly property string provider: Cfg.get("ai.provider", "claude-cli")
+    /** The client that signs in with an account instead of a pasted key. */
+    readonly property bool usingClient: provider === "claude-cli"
+
+    // The answer depends on another program's state, so it is asked again
+    // every time this page is looked at rather than remembered from before.
+    Component.onCompleted: if (page.usingClient) App.ai.refreshCli()
+    onUsingClientChanged: if (page.usingClient) App.ai.refreshCli()
 
     SettingsGroup {
         title: qsTr("Service")
@@ -34,16 +41,83 @@ SettingsPage {
 
         ChoiceSetting {
             label: qsTr("Provider")
-            description: qsTr("Both need an account with the company that runs them. Nothing is sent anywhere until you ask a question.")
+            description: qsTr("Claude Code signs in with an account you may already have, and needs no key. "
+                              + "The other two want a key from the company that runs them. Nothing is sent "
+                              + "anywhere until you ask a question.")
             key: "ai.provider"
-            defaultValue: "anthropic"
+            defaultValue: "claude-cli"
             options: [
-                { value: "anthropic", label: "Claude" },
+                { value: "claude-cli", label: "Claude Code" },
+                { value: "anthropic", label: qsTr("Claude API") },
                 { value: "gemini", label: "Gemini" }
             ]
         }
 
         SettingRow {
+            label: qsTr("Sign-in")
+            description: App.ai.cliDetail
+            wide: true
+            visible: page.usingClient
+
+            Column {
+                width: parent.width
+                spacing: 10
+
+                Text {
+                    width: parent.width
+                    visible: App.ai.cliState === "missing"
+                    text: App.ai.cliInstallCommand()
+                    color: Skin.text
+                    font.family: "monospace"
+                    font.pixelSize: 12
+                    wrapMode: Text.WrapAnywhere
+                }
+
+                Row {
+                    spacing: 8
+
+                    PushButton {
+                        text: {
+                            if (App.ai.cliState === "missing")
+                                return qsTr("Copy the command")
+                            return App.ai.cliState === "ready" ? qsTr("Sign in again")
+                                                               : qsTr("Sign in")
+                        }
+                        onClicked: {
+                            if (App.ai.cliState === "missing") {
+                                App.copyText(App.ai.cliInstallCommand())
+                                hint.text = qsTr("Copied. Paste it into a terminal, then come back "
+                                                 + "here and check again.")
+                                return
+                            }
+                            hint.text = App.ai.signInToCli()
+                                ? qsTr("A terminal opened. Follow it, then check again here.")
+                                : qsTr("No terminal was found. Run `claude auth login` yourself.")
+                        }
+                    }
+
+                    PushButton {
+                        text: qsTr("Check again")
+                        onClicked: {
+                            hint.text = ""
+                            App.ai.refreshCli()
+                        }
+                    }
+                }
+
+                Text {
+                    id: hint
+                    width: parent.width
+                    visible: text.length > 0
+                    color: Skin.muted
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                }
+            }
+        }
+
+        SettingRow {
+            visible: !page.usingClient
             label: page.provider === "gemini" ? qsTr("Gemini API key") : qsTr("Claude API key")
             description: page.provider === "gemini"
                          ? qsTr("From aistudio.google.com. Atoll also reads GEMINI_API_KEY from your environment.")
@@ -72,6 +146,7 @@ SettingsPage {
         }
 
         SettingRow {
+            visible: !page.usingClient
             label: qsTr("Check the connection")
             description: App.ai.keyTestResult.length > 0
                          ? App.ai.keyTestResult
@@ -90,7 +165,9 @@ SettingsPage {
             description: qsTr("Empty means the best general model the provider offers.")
             key: "ai.model"
             defaultValue: ""
-            placeholder: page.provider === "gemini" ? "gemini-2.5-pro" : "claude-opus-5"
+            placeholder: page.usingClient
+                         ? "sonnet"
+                         : (page.provider === "gemini" ? "gemini-2.5-pro" : "claude-opus-5")
         }
 
         BoolSetting {

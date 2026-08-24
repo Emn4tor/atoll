@@ -62,10 +62,12 @@ qt_add_executable(atoll
     src/ai/aitools.cpp             src/ai/aitools.h
     src/ai/aitypes.h
     src/ai/anthropicprovider.cpp   src/ai/anthropicprovider.h
+    src/ai/claudecliprovider.cpp   src/ai/claudecliprovider.h
     src/ai/commandrunner.cpp       src/ai/commandrunner.h
     src/ai/credentialstore.cpp     src/ai/credentialstore.h
     src/ai/geminiprovider.cpp      src/ai/geminiprovider.h
     src/ai/permissionbroker.cpp    src/ai/permissionbroker.h
+    src/ai/permissionhook.cpp      src/ai/permissionhook.h
     src/ai/screencapture.cpp       src/ai/screencapture.h
 
     src/config/config.cpp          src/config/config.h

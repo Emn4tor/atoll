@@ -21,11 +21,13 @@
 #include "system/lockmonitor.h"
 #include "system/visualizer.h"
 
+#include <QClipboard>
 #include <QCoreApplication>
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusMessage>
 #include <QDesktopServices>
+#include <QGuiApplication>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QQmlEngine>
@@ -91,6 +93,11 @@ Application::Application(QObject *parent)
     connect(m_ipc, &IpcService::shareRequested, m_share, &ShareService::offerPaths);
     connect(m_ipc, &IpcService::askRequested, m_ai, &AiService::ask);
     connect(m_ipc, &IpcService::assistantRequested, m_ai, &AiService::engage);
+    // The gate the command-line client is started with reaches the island
+    // here: a tool call comes in, a verdict goes back out, and in between a
+    // person is asked exactly as they would be for any other backend.
+    connect(m_ipc, &IpcService::toolReviewRequested, m_ai, &AiService::reviewToolCall);
+    connect(m_ai, &AiService::toolReviewAnswered, m_ipc, &IpcService::answerToolReview);
 
     // Whatever the assistant wants to say when nobody is looking at it goes
     // out through the island's own OSD, not through a desktop notification.
@@ -263,6 +270,13 @@ void Application::activateApp(const QString &desktopEntry)
 void Application::openUrl(const QString &url)
 {
     QDesktopServices::openUrl(QUrl(url));
+}
+
+void Application::copyText(const QString &text)
+{
+    if (auto *clipboard = QGuiApplication::clipboard()) {
+        clipboard->setText(text);
+    }
 }
 
 bool Application::islandRunning() const

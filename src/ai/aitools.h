@@ -40,6 +40,13 @@ public:
     /** The system prompt, with the machine's own details filled in. */
     static QString systemPrompt(const QString &userAddition);
 
+    /**
+     * What has to be said as well when the backend carries out its own tool
+     * calls: it has no terminal, it starts somewhere of Atoll's choosing, and
+     * the way it asks for administrator rights is not the way a script does.
+     */
+    static QString clientAddendum();
+
     /** Carry out one call. Exactly one signal follows, eventually. */
     void execute(const AiToolCall &call, AiRisk risk);
 

@@ -546,6 +546,26 @@ AiVerdict PermissionBroker::classify(const AiToolCall &call) const
         return verdict;
     }
 
+    // The client's own web tools. Both are the service reading a public page
+    // on the user's behalf - nothing on this machine changes, and nothing the
+    // user could not have opened in a browser is reached - so neither is worth
+    // stopping a person for. The address still shows in the detail line.
+    if (call.name == u"web_search"_s) {
+        verdict.risk = AiRisk::Safe;
+        verdict.summary = tr("Search the web for %1").arg(call.input.value(u"query"_s).toString());
+        verdict.detail = call.input.value(u"query"_s).toString();
+        verdict.grantKey = u"web"_s;
+        return verdict;
+    }
+
+    if (call.name == u"fetch_url"_s) {
+        verdict.risk = AiRisk::Safe;
+        verdict.summary = tr("Read a page from the web");
+        verdict.detail = call.input.value(u"url"_s).toString();
+        verdict.grantKey = u"web"_s;
+        return verdict;
+    }
+
     if (call.name == u"notify"_s || call.name == u"remember"_s) {
         verdict.risk = AiRisk::Safe;
         verdict.summary = call.name == u"notify"_s ? tr("Show a message") : tr("Remember a preference");

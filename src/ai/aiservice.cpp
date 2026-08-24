@@ -6,13 +6,20 @@
 
 #include "ai/aitools.h"
 #include "ai/anthropicprovider.h"
+#include "ai/claudecliprovider.h"
 #include "ai/credentialstore.h"
 #include "ai/geminiprovider.h"
 #include "ai/permissionbroker.h"
 #include "ai/screencapture.h"
 #include "config/config.h"
 
+#include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkAccessManager>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QTimer>
 
 using namespace Qt::StringLiterals;
@@ -40,9 +47,12 @@ AiService::AiService(Config *config, QObject *parent)
 {
     m_anthropic = new AnthropicProvider(m_network, this);
     m_gemini = new GeminiProvider(m_network, this);
+    m_cli = new ClaudeCliProvider(this);
 
-    for (AiProvider *provider : {static_cast<AiProvider *>(m_anthropic), static_cast<AiProvider *>(m_gemini)}) {
-        connect(provider, &AiProvider::textDelta, this, [this](const QString &text) {
+    for (AiBackend *provider : {static_cast<AiBackend *>(m_anthropic),
+                                static_cast<AiBackend *>(m_gemini),
+                                static_cast<AiBackend *>(m_cli)}) {
+        connect(provider, &AiBackend::textDelta, this, [this](const QString &text) {
             if (m_testing) {
                 return;
             }
@@ -52,7 +62,7 @@ AiService::AiService(Config *config, QObject *parent)
             m_answer.append(text);
             Q_EMIT answerChanged();
         });
-        connect(provider, &AiProvider::thoughtDelta, this, [this](const QString &text) {
+        connect(provider, &AiBackend::thoughtDelta, this, [this](const QString &text) {
             if (m_testing) {
                 return;
             }
@@ -63,8 +73,8 @@ AiService::AiService(Config *config, QObject *parent)
             }
             Q_EMIT answerChanged();
         });
-        connect(provider, &AiProvider::turnEnded, this, &AiService::onTurnEnded);
-        connect(provider, &AiProvider::failed, this, [this](const QString &reason) {
+        connect(provider, &AiBackend::turnEnded, this, &AiService::onTurnEnded);
+        connect(provider, &AiBackend::failed, this, [this](const QString &reason) {
             if (m_testing) {
                 m_testing = false;
                 m_keyTest = reason;
@@ -74,6 +84,27 @@ AiService::AiService(Config *config, QObject *parent)
             fail(reason);
         });
     }
+
+    // A backend that runs its own tools reports them rather than handing them
+    // over, so the island's list of steps is filled in from what it says.
+    connect(m_cli, &AiBackend::toolStarted, this, [this](const QString &id, const QString &summary) {
+        addStep(u"tool"_s, summary, u"running"_s, id);
+        setActivity(summary);
+        setState(u"working"_s);
+    });
+    connect(m_cli, &AiBackend::toolFinished, this, [this](const QString &id, bool ok, const QString &) {
+        updateStepById(id, ok ? u"done"_s : u"failed"_s);
+        setActivity({});
+    });
+    connect(m_cli, &ClaudeCliProvider::statusChanged, this, [this] {
+        if (m_cliTesting) {
+            m_cliTesting = false;
+            m_keyTest = cliDetail();
+            Q_EMIT keyTestChanged();
+        }
+        Q_EMIT cliChanged();
+        Q_EMIT configurationChanged();
+    });
 
     connect(m_toolbox, &AiToolbox::completed, this, &AiService::onToolResult);
     connect(m_toolbox, &AiToolbox::progress, this, [this](const QString &line) {
@@ -92,30 +123,53 @@ AiService::~AiService() = default;
 
 QString AiService::provider() const
 {
-    const QString configured = m_config->value(u"ai.provider"_s, u"anthropic"_s).toString();
-    return configured == u"gemini"_s ? u"gemini"_s : u"anthropic"_s;
+    const QString configured = m_config->value(u"ai.provider"_s, u"claude-cli"_s).toString();
+    if (configured == u"gemini"_s || configured == u"anthropic"_s) {
+        return configured;
+    }
+    return u"claude-cli"_s;
 }
 
 QString AiService::providerLabel() const
 {
-    return provider() == u"gemini"_s ? u"Gemini"_s : u"Claude"_s;
+    const QString name = provider();
+    if (name == u"gemini"_s) {
+        return u"Gemini"_s;
+    }
+    return u"Claude"_s;
 }
 
-AiProvider *AiService::activeProvider() const
+AiBackend *AiService::activeBackend() const
 {
-    return provider() == u"gemini"_s ? static_cast<AiProvider *>(m_gemini)
-                                     : static_cast<AiProvider *>(m_anthropic);
+    const QString name = provider();
+    if (name == u"gemini"_s) {
+        return m_gemini;
+    }
+    if (name == u"anthropic"_s) {
+        return m_anthropic;
+    }
+    return m_cli;
 }
 
 QString AiService::model() const
 {
     const QString configured = m_config->value(u"ai.model"_s, QString()).toString();
-    return configured.isEmpty() ? activeProvider()->defaultModel() : configured;
+    return configured.isEmpty() ? activeBackend()->defaultModel() : configured;
 }
 
 bool AiService::configured() const
 {
-    return (m_config->value(u"ai.enabled"_s, true).toBool()) && m_credentials->hasKey(provider());
+    if (!m_config->value(u"ai.enabled"_s, true).toBool()) {
+        return false;
+    }
+    if (provider() == u"claude-cli"_s) {
+        // Whether the client is signed in is a question that costs a process
+        // to answer, so it is not asked here. A client that is installed is
+        // treated as usable, and a login that turns out to be missing is
+        // reported the moment something is actually asked of it.
+        return m_cli->status().installed;
+    }
+    return m_credentials->hasKey(provider());
 }
 
 bool AiService::hasKeyFor(const QString &name) const
@@ -138,7 +192,15 @@ void AiService::setKeyFor(const QString &name, const QString &key)
 
 void AiService::testKey()
 {
-    AiProvider *target = activeProvider();
+    if (provider() == u"claude-cli"_s) {
+        m_cliTesting = true;
+        m_keyTest = tr("Checking…");
+        Q_EMIT keyTestChanged();
+        m_cli->refreshStatus();
+        return;
+    }
+
+    auto *target = qobject_cast<AiProvider *>(activeBackend());
     target->setApiKey(m_credentials->key(provider()));
 
     m_testing = true;
@@ -155,6 +217,97 @@ void AiService::testKey()
     turn.text = u"Are you there?"_s;
     request.history.append(turn);
     target->send(request);
+}
+
+// ---- the command-line client ---------------------------------------------
+
+QString AiService::cliState() const
+{
+    const CliStatus status = m_cli->status();
+    if (!status.installed) {
+        return u"missing"_s;
+    }
+    if (!status.loggedIn) {
+        // Nothing has been asked yet, so "not signed in" would be a guess.
+        return status.error.isEmpty() && status.method.isEmpty() ? u"checking"_s : u"signed-out"_s;
+    }
+    return u"ready"_s;
+}
+
+QString AiService::cliDetail() const
+{
+    const CliStatus status = m_cli->status();
+    if (!status.installed) {
+        return tr("The Claude Code client is not installed yet.");
+    }
+    if (!status.error.isEmpty()) {
+        return status.error;
+    }
+    if (!status.loggedIn) {
+        return cliState() == u"checking"_s
+            ? tr("Found at %1. Check the sign-in to be sure it can answer.").arg(status.path)
+            : tr("Found at %1, but nobody is signed in.").arg(status.path);
+    }
+    if (!status.account.isEmpty() && !status.plan.isEmpty()) {
+        return tr("Signed in as %1, on a %2 plan.").arg(status.account, status.plan);
+    }
+    if (!status.account.isEmpty()) {
+        return tr("Signed in as %1.").arg(status.account);
+    }
+    return tr("Signed in and ready.");
+}
+
+void AiService::refreshCli()
+{
+    m_cli->setExecutablePath(m_config->value(u"ai.cliPath"_s, QString()).toString());
+    m_cli->refreshStatus();
+    Q_EMIT cliChanged();
+}
+
+QString AiService::cliInstallCommand() const
+{
+    return u"curl -fsSL https://claude.ai/install.sh | bash"_s;
+}
+
+bool AiService::signInToCli()
+{
+    const CliStatus status = m_cli->status();
+    const QString client = status.installed ? status.path : u"claude"_s;
+    // Signing in is a conversation with a browser and a code to paste back, so
+    // it belongs in a terminal the user can see and type into - not in a
+    // process Atoll started behind them.
+    const QString command = u"%1 auth login; echo; echo 'You can close this window.'; read -r _"_s
+                                .arg(client);
+
+    struct Terminal {
+        const char *program;
+        QStringList before;
+    };
+    // xdg-terminal-exec first: it opens whatever this desktop calls its
+    // terminal, which on a KDE install is the one the user already knows.
+    static const QList<Terminal> terminals = {
+        {"xdg-terminal-exec", {}},
+        {"konsole", {u"-e"_s}},
+        {"ptyxis", {u"--"_s}},
+        {"gnome-terminal", {u"--"_s}},
+        {"alacritty", {u"-e"_s}},
+        {"kitty", {}},
+        {"foot", {}},
+        {"xterm", {u"-e"_s}},
+    };
+
+    for (const Terminal &terminal : terminals) {
+        const QString path = QStandardPaths::findExecutable(QString::fromLatin1(terminal.program));
+        if (path.isEmpty()) {
+            continue;
+        }
+        QStringList arguments = terminal.before;
+        arguments << u"sh"_s << u"-c"_s << command;
+        if (QProcess::startDetached(path, arguments)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool AiService::screenAvailable() const
@@ -219,9 +372,15 @@ void AiService::setActivity(const QString &line)
     Q_EMIT activityChanged();
 }
 
-void AiService::addStep(const QString &kind, const QString &text, const QString &status)
+void AiService::addStep(const QString &kind,
+                        const QString &text,
+                        const QString &status,
+                        const QString &id)
 {
-    m_steps.append(QVariantMap{{u"kind"_s, kind}, {u"text"_s, text}, {u"status"_s, status}});
+    m_steps.append(QVariantMap{{u"kind"_s, kind},
+                               {u"text"_s, text},
+                               {u"status"_s, status},
+                               {u"id"_s, id}});
     if (m_steps.size() > 40) {
         m_steps.removeFirst();
     }
@@ -240,6 +399,23 @@ void AiService::updateLastStep(const QString &status, const QString &text)
     }
     m_steps[m_steps.size() - 1] = step;
     Q_EMIT stepsChanged();
+}
+
+void AiService::updateStepById(const QString &id, const QString &status)
+{
+    if (id.isEmpty()) {
+        return;
+    }
+    for (int index = m_steps.size() - 1; index >= 0; --index) {
+        QVariantMap step = m_steps.at(index).toMap();
+        if (step.value(u"id"_s).toString() != id) {
+            continue;
+        }
+        step.insert(u"status"_s, status);
+        m_steps[index] = step;
+        Q_EMIT stepsChanged();
+        return;
+    }
 }
 
 // ---- the island's verbs --------------------------------------------------
@@ -315,9 +491,19 @@ void AiService::cancel()
 {
     m_anthropic->abort();
     m_gemini->abort();
+    m_cli->abort();
     m_toolbox->cancel();
     m_queue.clear();
     m_results.clear();
+    // Every tool call the client is holding open has to be told something, or
+    // it sits there until its own patience runs out.
+    if (!m_reviewToken.isEmpty()) {
+        answerReview(m_reviewToken, false, tr("The user stopped the assistant."));
+        m_reviewToken.clear();
+    }
+    while (!m_reviews.isEmpty()) {
+        answerReview(m_reviews.dequeue().token, false, tr("The user stopped the assistant."));
+    }
     m_awaitingPermission = false;
     m_pending = {};
     m_background = false;
@@ -368,8 +554,25 @@ void AiService::ask(const QString &text)
         connect(capture, &ScreenCapture::captured, this, [this, capture](const QByteArray &png) {
             capture->deleteLater();
             if (!m_history.isEmpty()) {
-                m_history.last().image = png;
-                m_history.last().imageMediaType = u"image/png"_s;
+                if (activeBackend()->drivesTools()) {
+                    // The client reads pictures off disk rather than out of a
+                    // message, so the screenshot is left somewhere it can open
+                    // and the question says where.
+                    const QString path =
+                        QDir(ClaudeCliProvider::workspacePath()).filePath(u"screen.png"_s);
+                    QFile file(path);
+                    if (file.open(QIODevice::WriteOnly)) {
+                        file.write(png);
+                        file.close();
+                        m_history.last().text +=
+                            tr("\n\n(A picture of the screen as it is right now has been saved to "
+                               "%1. Open it to see what I am looking at.)")
+                                .arg(path);
+                    }
+                } else {
+                    m_history.last().image = png;
+                    m_history.last().imageMediaType = u"image/png"_s;
+                }
             }
             setShareScreen(false);
             setActivity({});
@@ -393,8 +596,13 @@ void AiService::ask(const QString &text)
 
 void AiService::runTurn()
 {
-    AiProvider *target = activeProvider();
-    target->setApiKey(m_credentials->key(provider()));
+    AiBackend *target = activeBackend();
+    if (auto *keyed = qobject_cast<AiProvider *>(target)) {
+        keyed->setApiKey(m_credentials->key(provider()));
+    }
+    if (auto *client = qobject_cast<ClaudeCliProvider *>(target)) {
+        client->setExecutablePath(m_config->value(u"ai.cliPath"_s, QString()).toString());
+    }
 
     AiRequest request;
     request.model = model();
@@ -407,6 +615,14 @@ void AiService::runTurn()
     request.tools = AiToolbox::definitions(m_config->value(u"ai.allowScreenshots"_s, true).toBool()
                                            && ScreenCapture::available());
     request.history = m_history;
+
+    // A backend that runs its own tools was given them when it started, so the
+    // catalogue above is not its business and neither is the round counter:
+    // it stops itself.
+    if (target->drivesTools()) {
+        request.tools = {};
+        request.systemPrompt += AiToolbox::clientAddendum();
+    }
 
     setState(m_answer.isEmpty() ? u"thinking"_s : u"answering"_s);
     target->send(request);
@@ -428,7 +644,7 @@ void AiService::onTurnEnded(const QString &stopReason,
     turn.text = m_answer;
     turn.toolCalls = calls;
     turn.rawContent = raw;
-    turn.rawProvider = activeProvider()->id();
+    turn.rawProvider = activeBackend()->id();
     m_history.append(turn);
 
     if (stopReason == u"pause_turn"_s) {
@@ -533,6 +749,18 @@ void AiService::allow(bool rememberForSession)
     const AiVerdict verdict = m_pending;
     m_pending = {};
     Q_EMIT pendingChanged();
+
+    if (!m_reviewToken.isEmpty()) {
+        // The client is holding the call and will make it itself; all it needs
+        // from here is the word.
+        const QString token = m_reviewToken;
+        m_reviewToken.clear();
+        answerReview(token, true, tr("Allowed on the island."));
+        setState(u"working"_s);
+        showNextReview();
+        return;
+    }
+
     executeNow(m_current, verdict);
 }
 
@@ -542,11 +770,24 @@ void AiService::deny()
         return;
     }
     m_awaitingPermission = false;
-    addStep(u"tool"_s,
-            m_pending.summary.isEmpty() ? m_current.name : m_pending.summary,
-            u"denied"_s);
+    const QString summary = m_pending.summary.isEmpty() ? m_current.name : m_pending.summary;
     m_pending = {};
     Q_EMIT pendingChanged();
+
+    if (!m_reviewToken.isEmpty()) {
+        const QString token = m_reviewToken;
+        m_reviewToken.clear();
+        updateStepById(m_current.id, u"denied"_s);
+        answerReview(token,
+                     false,
+                     tr("The user did not allow this. Do not try it again. Continue without it, "
+                        "or tell them what you would need."));
+        setState(u"working"_s);
+        showNextReview();
+        return;
+    }
+
+    addStep(u"tool"_s, summary, u"denied"_s);
 
     AiToolResult result;
     result.id = m_current.id;
@@ -579,11 +820,87 @@ void AiService::finishToolRound()
     runTurn();
 }
 
+// ---- judging what the client wants to do ---------------------------------
+
+void AiService::reviewToolCall(const QString &payload, const QString &token)
+{
+    const QJsonObject request = QJsonDocument::fromJson(payload.toUtf8()).object();
+    const QString tool = request.value(u"tool_name"_s).toString();
+    const QVariantMap input = request.value(u"tool_input"_s).toObject().toVariantMap();
+    const QString useId = request.value(u"tool_use_id"_s).toString();
+
+    // Nothing else on this machine has any business asking, and a question
+    // with no conversation behind it cannot be shown to anybody either.
+    if (!m_cli->busy()) {
+        answerReview(token, false, tr("Atoll has no assistant session waiting for this."));
+        return;
+    }
+
+    const AiToolCall call = ClaudeCliProvider::toAtollCall(useId, tool, input);
+    const AiVerdict verdict = m_broker->classify(call);
+
+    if (verdict.risk == AiRisk::Forbidden || !m_broker->tierEnabled(verdict.risk)) {
+        updateStepById(useId, u"denied"_s);
+        answerReview(token,
+                     false,
+                     verdict.risk == AiRisk::Forbidden
+                         ? (verdict.refusal.isEmpty() ? tr("Atoll refuses this action.")
+                                                      : verdict.refusal)
+                         : tr("The user's settings do not allow this (%1). Suggest what they could "
+                              "change, or find another way.")
+                               .arg(PermissionBroker::tierTitle(verdict.risk)));
+        return;
+    }
+
+    if (m_broker->isPreApproved(verdict)) {
+        answerReview(token, true, tr("Allowed without asking, by the user's settings."));
+        return;
+    }
+
+    m_reviews.enqueue(PendingReview{token, call, verdict});
+    showNextReview();
+}
+
+void AiService::showNextReview()
+{
+    if (m_awaitingPermission || m_reviews.isEmpty()) {
+        return;
+    }
+
+    const PendingReview review = m_reviews.dequeue();
+    m_reviewToken = review.token;
+    m_current = review.call;
+    m_pending = review.verdict;
+    m_awaitingPermission = true;
+    if (m_background) {
+        m_background = false;
+        m_engaged = true;
+    }
+    setState(u"permission"_s);
+    Q_EMIT pendingChanged();
+    Q_EMIT stateChanged();
+}
+
+void AiService::answerReview(const QString &token, bool allowed, const QString &reason)
+{
+    const QJsonObject verdict{{u"decision"_s, allowed ? u"allow"_s : u"deny"_s},
+                              {u"reason"_s, reason}};
+    Q_EMIT toolReviewAnswered(
+        token, QString::fromUtf8(QJsonDocument(verdict).toJson(QJsonDocument::Compact)));
+}
+
 void AiService::fail(const QString &reason)
 {
     m_error = reason;
     m_queue.clear();
     m_results.clear();
+    if (!m_reviewToken.isEmpty()) {
+        answerReview(m_reviewToken, false, tr("The assistant stopped."));
+        m_reviewToken.clear();
+    }
+    while (!m_reviews.isEmpty()) {
+        answerReview(m_reviews.dequeue().token, false, tr("The assistant stopped."));
+    }
     m_awaitingPermission = false;
     m_pending = {};
     setActivity({});

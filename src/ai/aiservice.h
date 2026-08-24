@@ -14,6 +14,7 @@
 
 class AiToolbox;
 class AnthropicProvider;
+class ClaudeCliProvider;
 class Config;
 class CredentialStore;
 class GeminiProvider;
@@ -79,6 +80,12 @@ class AiService : public QObject
     Q_PROPERTY(QString pendingRisk READ pendingRisk NOTIFY pendingChanged)
     /** Whether saying yes will bring up a system password prompt. */
     Q_PROPERTY(bool pendingElevated READ pendingElevated NOTIFY pendingChanged)
+
+    // ---- the command-line client, for the settings window -----------------
+    /** missing | signed-out | checking | ready */
+    Q_PROPERTY(QString cliState READ cliState NOTIFY cliChanged)
+    /** One sentence about that state, for the person reading it. */
+    Q_PROPERTY(QString cliDetail READ cliDetail NOTIFY cliChanged)
 
     /** Whether the next question carries a picture of the screen. */
     Q_PROPERTY(bool shareScreen READ shareScreen WRITE setShareScreen NOTIFY shareScreenChanged)
@@ -152,6 +159,9 @@ public:
         return m_pending.risk == AiRisk::Admin;
     }
 
+    QString cliState() const;
+    QString cliDetail() const;
+
     bool shareScreen() const
     {
         return m_shareScreen;
@@ -176,12 +186,25 @@ public:
     /** Forget the conversation and every allowance granted in it. */
     Q_INVOKABLE void startOver();
 
+    /**
+     * Decide whether a tool call the command-line client is about to make may
+     * go ahead. The verdict is sent back through `toolReviewAnswered`, which
+     * may be a long time later, because the answer is usually a person's.
+     */
+    void reviewToolCall(const QString &payload, const QString &token);
+
     // ---- what the settings window calls ----------------------------------
     Q_INVOKABLE bool hasKeyFor(const QString &provider) const;
     Q_INVOKABLE QString keyBackendFor(const QString &provider) const;
     Q_INVOKABLE void setKeyFor(const QString &provider, const QString &key);
     /** Ask the provider a trivial question, to prove the key works. */
     Q_INVOKABLE void testKey();
+    /** Look again for the command-line client and its login. */
+    Q_INVOKABLE void refreshCli();
+    /** Open a terminal on the client's sign-in flow. False if none was found. */
+    Q_INVOKABLE bool signInToCli();
+    /** The command that installs the client, for the user to run or copy. */
+    Q_INVOKABLE QString cliInstallCommand() const;
     Q_PROPERTY(QString keyTestResult READ keyTestResult NOTIFY keyTestChanged)
     QString keyTestResult() const
     {
@@ -198,6 +221,9 @@ Q_SIGNALS:
     void pendingChanged();
     void shareScreenChanged();
     void keyTestChanged();
+    void cliChanged();
+    /** `verdictJson` is what the waiting tool call gets told. */
+    void toolReviewAnswered(const QString &token, const QString &verdictJson);
     /** The assistant wants a line shown on the island. */
     void messageRequested(const QString &summary, const QString &body);
     /** The island should give the input field the keyboard. */
@@ -206,11 +232,19 @@ Q_SIGNALS:
     void setupRequested();
 
 private:
-    AiProvider *activeProvider() const;
+    AiBackend *activeBackend() const;
     void setState(const QString &state);
     void setActivity(const QString &line);
-    void addStep(const QString &kind, const QString &text, const QString &status);
+    void addStep(const QString &kind, const QString &text, const QString &status,
+                 const QString &id = {});
     void updateLastStep(const QString &status, const QString &text = {});
+    /** Update the step a self-driving backend started under `id`, if it is still shown. */
+    void updateStepById(const QString &id, const QString &status);
+
+    /** Send one waiting tool call its verdict. */
+    void answerReview(const QString &token, bool allowed, const QString &reason);
+    /** Put the next tool call that needs a person in front of them. */
+    void showNextReview();
 
     void runTurn();
     void onTurnEnded(const QString &stopReason, const QList<AiToolCall> &calls, const QJsonArray &raw);
@@ -225,6 +259,7 @@ private:
     QNetworkAccessManager *m_network = nullptr;
     AnthropicProvider *m_anthropic = nullptr;
     GeminiProvider *m_gemini = nullptr;
+    ClaudeCliProvider *m_cli = nullptr;
     CredentialStore *m_credentials = nullptr;
     PermissionBroker *m_broker = nullptr;
     AiToolbox *m_toolbox = nullptr;
@@ -243,6 +278,23 @@ private:
     bool m_shareScreen = false;
     /** Guards against a model that keeps calling tools and never answers. */
     int m_rounds = 0;
+
+    /** A tool call the command-line client is holding, waiting to be judged. */
+    struct PendingReview {
+        QString token;
+        AiToolCall call;
+        AiVerdict verdict;
+    };
+    /**
+     * The client can ask about several calls at once, and each one is a
+     * process sitting there waiting, so they are answered in turn rather than
+     * one of them being quietly forgotten.
+     */
+    QQueue<PendingReview> m_reviews;
+    /** The review currently on the island, if the pending question is one. */
+    QString m_reviewToken;
+    /** True while the settings window is waiting for a login check. */
+    bool m_cliTesting = false;
 
     QQueue<AiToolCall> m_queue;
     QList<AiToolResult> m_results;
