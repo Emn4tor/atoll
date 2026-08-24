@@ -79,7 +79,7 @@ whatever Plasma has there. All three parts of that are settings.
 ### Arch, in one go
 
 ```sh
-git clone https://github.com/atoll-shell/atoll.git
+git clone https://github.com/jojo2k7/atoll.git
 cd atoll
 ./scripts/install.sh
 ```
