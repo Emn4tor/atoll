@@ -144,8 +144,21 @@ looks at what the action would actually do:
 | Tier | What it covers | What happens |
 |---|---|---|
 | **Reads** | Listing a directory, reading a file, `pacman -Q`, `systemctl status` | Runs straight away. Nothing here is anything you could not have looked at yourself. |
-| **Changes your session** | Writing in your home directory, changing a Plasma setting, opening an app | Asks. You can allow it once, or for the rest of the session. |
-| **Administrator** | Installing packages, a system upgrade, anything as root | Asks every time, and then **your desktop** asks — the ordinary polkit dialog, which honours a password, a fingerprint or a hardware key exactly as it does everywhere else. |
+| **Changes your session** | Writing in your home directory, changing a Plasma setting, opening an app | Asks. |
+| **Administrator** | Installing packages, a system upgrade, anything as root | Asks, and then **your desktop** asks — the ordinary polkit dialog, which honours a password, a fingerprint or a hardware key exactly as it does everywhere else. |
+
+The first button on that question is **Allow, and stop asking**, and it is the
+one most people want: you asked for a job to be done, not to be consulted about
+each of the four commands it turns out to take. Say it once and the assistant
+carries on by itself for the rest of the conversation, reporting each step on
+the island as it goes; the panel says *acting on its own* while it does, and
+**Stop** ends it at any point. *Just this once* answers only the step in front
+of you. Starting a new conversation forgets the whole arrangement.
+
+What that permission cannot do is widen the rules: anything refused outright
+stays refused, a tier switched off in the settings stays unreachable, and every
+root step still meets your desktop's own password dialog, which is not Atoll's
+to waive.
 
 That gate is the same one however the assistant is connected. When the answer
 comes from the Claude Code client, the client carries out its own tool calls -
@@ -253,9 +266,15 @@ atollctl text drive-harddisk "Backup finished"
 atollctl progress cloud-upload 64 "Uploading"
 atollctl share ~/Pictures/holiday.jpg
 atollctl ask "why is my laptop fan so loud"
+atollctl screenshot
 atollctl toggle
 atollctl settings
 ```
+
+`atollctl screenshot` asks the desktop for one picture of the screen, writes it
+where the assistant can open it and prints the path. It is also how the
+assistant looks at the screen itself, so a question like *what do you see* is
+answered rather than turned back into a request for a screenshot.
 
 ```sh
 atollctl assistant           # open it with an empty box

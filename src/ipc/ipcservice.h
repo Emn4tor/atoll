@@ -68,9 +68,21 @@ public Q_SLOTS:
      */
     Q_SCRIPTABLE QString reviewToolCall(const QString &payload);
 
+    /**
+     * Take one picture of the screen and answer with the path it was written
+     * to, or with a line starting "error:".
+     *
+     * There is deliberately no argument. Where the file lands is Atoll's
+     * decision, because a caller that could name the path could hand a
+     * screenshot's worth of bytes to any file the session can write.
+     */
+    Q_SCRIPTABLE QString captureScreen();
+
 public:
     /** Answer a review that reviewToolCall left open. */
     void answerToolReview(const QString &token, const QString &verdictJson);
+    /** Answer a picture that captureScreen left open. */
+    void answerScreenCapture(const QString &token, const QString &result);
     /** Whether anything is still waiting for an answer. */
     bool hasOpenReviews() const
     {
@@ -91,6 +103,8 @@ Q_SIGNALS:
     void raiseRequested();
     /** A tool call is waiting for a verdict; answer it with `token`. */
     void toolReviewRequested(const QString &payload, const QString &token);
+    /** Somebody is waiting for a picture of the screen. */
+    void screenCaptureRequested(const QString &token);
 
 private:
     /** One caller left hanging on reviewToolCall, and how to reach it. */
@@ -101,6 +115,10 @@ private:
         QDBusConnection connection = QDBusConnection::sessionBus();
         QDBusMessage request;
     };
+
+    /** Park a caller and hand back a token to answer it with later. */
+    QString park(const QString &kind);
+    void sendReply(const QString &token, const QString &value);
 
     QHash<QString, OpenReview> m_reviews;
     int m_reviewCounter = 0;

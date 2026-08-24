@@ -18,6 +18,7 @@ Usage: atollctl <command> [arguments]
   share <file> [file...]       offer files to nearby devices
   assistant                    open the assistant with an empty box
   ask <question>               put a question to the assistant
+  screenshot                   take a picture of the screen, print its path
   settings                     open the settings window
   reload                       re-read ~/.config/atoll/atoll.json
   version                      print the running version
@@ -28,6 +29,7 @@ Examples:
   atollctl progress cloud-upload 64 "Uploading"
   atollctl share ~/Pictures/holiday.jpg
   atollctl ask "why is my laptop fan so loud"
+  atollctl screenshot
   atollctl settings
 
 Binding `atollctl assistant` to a key in System Settings gives the assistant a
@@ -62,6 +64,17 @@ case "$command" in
     version)
         gdbus call --session --dest "$BUS_NAME" --object-path "$OBJECT" \
             --method "$IFACE.version" | tr -d "(),'"
+        ;;
+    screenshot)
+        # The desktop asks for consent itself and a person has to answer it, so
+        # the wait is far longer than the default. What comes back is the path
+        # the picture was written to, or a line starting "error:".
+        result=$(gdbus call --timeout 300 --session --dest "$BUS_NAME" \
+            --object-path "$OBJECT" --method "$IFACE.captureScreen" | tr -d "(),'")
+        printf '%s\n' "$result"
+        case "$result" in
+            error:*) exit 1 ;;
+        esac
         ;;
     text)
         [ $# -eq 2 ] || { usage; exit 1; }

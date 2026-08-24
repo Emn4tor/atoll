@@ -293,7 +293,14 @@ bool PermissionBroker::isPreApproved(const AiVerdict &verdict) const
     if (verdict.risk == AiRisk::Safe) {
         return true;
     }
-    // Root is never remembered. A polkit prompt is the point, not an obstacle.
+    // Told once to get on with it. Root is included deliberately: the dialog
+    // that actually guards it belongs to the desktop, it is still shown, and
+    // asking twice for the same thing only teaches people to stop reading.
+    if (m_blanket) {
+        return true;
+    }
+    // Otherwise root is never remembered. A polkit prompt is the point, not an
+    // obstacle.
     if (verdict.risk == AiRisk::Admin) {
         return false;
     }
@@ -310,9 +317,15 @@ void PermissionBroker::grantForSession(const QString &grantKey)
     }
 }
 
+void PermissionBroker::grantEverythingForSession()
+{
+    m_blanket = true;
+}
+
 void PermissionBroker::revokeAll()
 {
     m_sessionGrants.clear();
+    m_blanket = false;
 }
 
 AiVerdict PermissionBroker::classifyPath(const QString &path, bool forWriting) const
@@ -357,6 +370,19 @@ AiVerdict PermissionBroker::classifyCommand(const QString &command) const
     verdict.risk = AiRisk::Safe;
 
     const QString flat = command.simplified();
+
+    // The island's own screenshot verb, which is how the assistant answers a
+    // question about what is on the screen. It is worth naming: the command
+    // line says nothing about what is really being asked for, and this is the
+    // one the user most needs to recognise before they say yes.
+    static const QRegularExpression screenshot(u"^atollctl screenshot$"_s);
+    if (screenshot.match(flat).hasMatch()) {
+        verdict.risk = AiRisk::User;
+        verdict.summary = tr("Look at your screen");
+        verdict.detail = tr("One still picture of the current screen is sent to the assistant.");
+        verdict.grantKey = u"screenshot"_s;
+        return verdict;
+    }
 
     // A handful of shapes are refused before anything is parsed, because their
     // damage is not proportional to how convincing the explanation was.

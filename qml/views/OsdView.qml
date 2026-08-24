@@ -18,7 +18,7 @@ Item {
     readonly property bool boosted: osd.percent > 100
 
     implicitHeight: 46
-    implicitWidth: Math.min(Cfg.maxWidth, row.implicitWidth + 36)
+    implicitWidth: Math.min(Cfg.maxWidth, row.implicitWidth + Math.max(36, Theme.edgeInset * 2))
 
     Row {
         id: row

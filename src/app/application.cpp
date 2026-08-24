@@ -98,6 +98,10 @@ Application::Application(QObject *parent)
     // person is asked exactly as they would be for any other backend.
     connect(m_ipc, &IpcService::toolReviewRequested, m_ai, &AiService::reviewToolCall);
     connect(m_ai, &AiService::toolReviewAnswered, m_ipc, &IpcService::answerToolReview);
+    // `atollctl screenshot` - which is how the assistant looks at the screen
+    // rather than asking the user to describe it - arrives the same way.
+    connect(m_ipc, &IpcService::screenCaptureRequested, m_ai, &AiService::captureScreenFor);
+    connect(m_ai, &AiService::screenCaptureAnswered, m_ipc, &IpcService::answerScreenCapture);
 
     // Whatever the assistant wants to say when nobody is looking at it goes
     // out through the island's own OSD, not through a desktop notification.

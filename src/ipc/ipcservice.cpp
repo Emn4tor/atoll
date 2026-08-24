@@ -77,29 +77,53 @@ void IpcService::ask(const QString &prompt)
     Q_EMIT askRequested(prompt);
 }
 
+QString IpcService::park(const QString &kind)
+{
+    // The answer depends on a person - approving a step, or agreeing to let
+    // the screen be looked at - so the method call is set aside and the reply
+    // sent whenever that person gets to it.
+    setDelayedReply(true);
+    const QString token = u"%1-%2"_s.arg(kind).arg(++m_reviewCounter);
+    m_reviews.insert(token, OpenReview{connection(), message()});
+    return token;
+}
+
+void IpcService::sendReply(const QString &token, const QString &value)
+{
+    const auto waiting = m_reviews.take(token);
+    if (waiting.request.type() == QDBusMessage::InvalidMessage) {
+        return;
+    }
+    QDBusConnection connection = waiting.connection;
+    connection.send(waiting.request.createReply(value));
+}
+
 QString IpcService::reviewToolCall(const QString &payload)
 {
     if (!calledFromDBus()) {
         return {};
     }
-    // The answer depends on a person, so the method call is parked and the
-    // reply sent from allow() or deny() whenever that person gets to it.
-    setDelayedReply(true);
+    Q_EMIT toolReviewRequested(payload, park(u"review"_s));
+    return {};
+}
 
-    const QString token = u"review-%1"_s.arg(++m_reviewCounter);
-    m_reviews.insert(token, OpenReview{connection(), message()});
-    Q_EMIT toolReviewRequested(payload, token);
+QString IpcService::captureScreen()
+{
+    if (!calledFromDBus()) {
+        return {};
+    }
+    Q_EMIT screenCaptureRequested(park(u"shot"_s));
     return {};
 }
 
 void IpcService::answerToolReview(const QString &token, const QString &verdictJson)
 {
-    const auto review = m_reviews.take(token);
-    if (review.request.type() == QDBusMessage::InvalidMessage) {
-        return;
-    }
-    QDBusConnection connection = review.connection;
-    connection.send(review.request.createReply(verdictJson));
+    sendReply(token, verdictJson);
+}
+
+void IpcService::answerScreenCapture(const QString &token, const QString &result)
+{
+    sendReply(token, result);
 }
 
 void IpcService::reloadConfig()

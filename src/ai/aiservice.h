@@ -80,6 +80,8 @@ class AiService : public QObject
     Q_PROPERTY(QString pendingRisk READ pendingRisk NOTIFY pendingChanged)
     /** Whether saying yes will bring up a system password prompt. */
     Q_PROPERTY(bool pendingElevated READ pendingElevated NOTIFY pendingChanged)
+    /** True once the user has told it to stop asking for this conversation. */
+    Q_PROPERTY(bool unattended READ unattended NOTIFY stateChanged)
 
     // ---- the command-line client, for the settings window -----------------
     /** missing | signed-out | checking | ready */
@@ -158,6 +160,7 @@ public:
     {
         return m_pending.risk == AiRisk::Admin;
     }
+    bool unattended() const;
 
     QString cliState() const;
     QString cliDetail() const;
@@ -182,6 +185,12 @@ public:
     Q_INVOKABLE void bringToFront();
     /** Answer the permission the island is showing. */
     Q_INVOKABLE void allow(bool rememberForSession);
+    /**
+     * Allow this one and everything after it, until the conversation ends.
+     * The one answer somebody wants to give when they asked for a job rather
+     * than for a step.
+     */
+    Q_INVOKABLE void allowEverything();
     Q_INVOKABLE void deny();
     /** Forget the conversation and every allowance granted in it. */
     Q_INVOKABLE void startOver();
@@ -192,6 +201,12 @@ public:
      * may be a long time later, because the answer is usually a person's.
      */
     void reviewToolCall(const QString &payload, const QString &token);
+
+    /**
+     * Take the picture the assistant asked for and answer with where it went.
+     * The path is Atoll's to choose, so the caller does not name one.
+     */
+    void captureScreenFor(const QString &token);
 
     // ---- what the settings window calls ----------------------------------
     Q_INVOKABLE bool hasKeyFor(const QString &provider) const;
@@ -224,6 +239,8 @@ Q_SIGNALS:
     void cliChanged();
     /** `verdictJson` is what the waiting tool call gets told. */
     void toolReviewAnswered(const QString &token, const QString &verdictJson);
+    /** The path the picture was written to, or a line starting "error:". */
+    void screenCaptureAnswered(const QString &token, const QString &result);
     /** The assistant wants a line shown on the island. */
     void messageRequested(const QString &summary, const QString &body);
     /** The island should give the input field the keyboard. */

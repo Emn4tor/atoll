@@ -13,6 +13,7 @@
 #include "ai/screencapture.h"
 #include "config/config.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
@@ -21,6 +22,8 @@
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTimer>
+
+#include <memory>
 
 using namespace Qt::StringLiterals;
 
@@ -348,6 +351,11 @@ int AiService::exchanges() const
     return count;
 }
 
+bool AiService::unattended() const
+{
+    return m_broker->grantedEverything();
+}
+
 QString AiService::pendingTier() const
 {
     return PermissionBroker::tierTitle(m_pending.risk);
@@ -621,7 +629,9 @@ void AiService::runTurn()
     // it stops itself.
     if (target->drivesTools()) {
         request.tools = {};
-        request.systemPrompt += AiToolbox::clientAddendum();
+        request.systemPrompt +=
+            AiToolbox::clientAddendum(m_config->value(u"ai.allowScreenshots"_s, true).toBool()
+                                      && ScreenCapture::available());
     }
 
     setState(m_answer.isEmpty() ? u"thinking"_s : u"answering"_s);
@@ -764,6 +774,18 @@ void AiService::allow(bool rememberForSession)
     executeNow(m_current, verdict);
 }
 
+void AiService::allowEverything()
+{
+    if (!m_awaitingPermission) {
+        return;
+    }
+    m_broker->grantEverythingForSession();
+    // Everything queued behind this one is now pre-approved as well, and
+    // allow() drains the queue for us.
+    allow(false);
+    Q_EMIT stateChanged();
+}
+
 void AiService::deny()
 {
     if (!m_awaitingPermission) {
@@ -859,6 +881,69 @@ void AiService::reviewToolCall(const QString &payload, const QString &token)
 
     m_reviews.enqueue(PendingReview{token, call, verdict});
     showNextReview();
+}
+
+void AiService::captureScreenFor(const QString &token)
+{
+    // Exactly one answer goes back, whichever way this ends. The caller is a
+    // command sitting there waiting, and a screenshot that neither arrives nor
+    // fails would hold the whole conversation open behind it.
+    auto answered = std::make_shared<bool>(false);
+    const auto answer = [this, token, answered](const QString &result) {
+        if (*answered) {
+            return;
+        }
+        *answered = true;
+        setActivity({});
+        Q_EMIT screenCaptureAnswered(token, result);
+    };
+    const auto fail = [answer](const QString &reason) {
+        answer(u"error: "_s + reason);
+    };
+
+    if (!m_config->value(u"ai.allowScreenshots"_s, true).toBool()) {
+        fail(tr("the user has switched off letting the assistant look at the screen."));
+        return;
+    }
+    if (!ScreenCapture::available()) {
+        fail(tr("nothing on this machine can take a screenshot."));
+        return;
+    }
+
+    // Always the same file. The assistant reads it straight after asking for
+    // it, so keeping one around beats leaving a trail of pictures of somebody's
+    // screen in a temporary directory.
+    const QString target = QDir(ClaudeCliProvider::workspacePath()).filePath(u"screen.png"_s);
+
+    setActivity(tr("Taking a picture of the screen…"));
+    auto *capture = new ScreenCapture(this);
+    connect(capture, &ScreenCapture::captured, this, [capture, target, answer, fail](const QByteArray &png) {
+        capture->deleteLater();
+        QFile file(target);
+        if (!file.open(QIODevice::WriteOnly)) {
+            fail(QCoreApplication::translate("AiService",
+                                             "the picture could not be written to %1.")
+                     .arg(target));
+            return;
+        }
+        file.write(png);
+        file.close();
+        answer(target);
+    });
+    connect(capture, &ScreenCapture::failed, this, [capture, fail](const QString &reason) {
+        capture->deleteLater();
+        fail(reason);
+    });
+
+    // The consent dialog belongs to the desktop and there is no telling whether
+    // anybody is in front of it. Waiting a minute for an answer is generous;
+    // waiting for ever is a hung assistant.
+    QTimer::singleShot(60000, this, [fail] {
+        fail(QCoreApplication::translate(
+            "AiService", "nobody answered the desktop's request to share the screen."));
+    });
+
+    capture->capture();
 }
 
 void AiService::showNextReview()

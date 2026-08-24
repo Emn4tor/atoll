@@ -74,8 +74,10 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.leftMargin: 16
-        anchors.rightMargin: 16
+        // Never closer to the side than the corner curve reaches in, so the
+        // outermost rows stay over the black however round the island is.
+        anchors.leftMargin: Math.max(16, Theme.edgeInset)
+        anchors.rightMargin: Math.max(16, Theme.edgeInset)
         spacing: 10
 
         // ---- head row: face, and whatever the assistant is doing ----------
@@ -241,6 +243,12 @@ Item {
                                    : qsTr("Add a key for Claude or Gemini and the island can act on this machine.")
                         case "permission":
                             return view.ai.pendingTier
+                        case "working":
+                            // Worth a line: the user handed over the wheel, and
+                            // should be able to see that they did.
+                            return view.ai.unattended
+                                   ? qsTr("Acting on its own - stop it any time")
+                                   : ""
                         case "thinking":
                             return view.ai.thought.length > 0
                                    ? view.ai.thought.slice(-110)
@@ -440,16 +448,23 @@ Item {
                 { label: qsTr("Stop"), destructive: true, action: () => view.ai.cancel() }
             ]
         case "permission":
+            // The first button is the one most people mean: they asked for a
+            // job to be done, not to be consulted about each command it takes.
+            // Saying it once covers the rest of the conversation; a root step
+            // still meets the desktop's own password dialog afterwards.
             if (view.ai.pendingElevated) {
                 return [
-                    { label: qsTr("Allow"), accented: true, icon: ["security-high", "dialog-password"],
-                      action: () => view.ai.allow(false) },
+                    { label: qsTr("Allow, and stop asking"), accented: true,
+                      icon: ["security-high", "dialog-password"],
+                      action: () => view.ai.allowEverything() },
+                    { label: qsTr("Just this once"), action: () => view.ai.allow(false) },
                     { label: qsTr("Don't allow"), destructive: true, action: () => view.ai.deny() }
                 ]
             }
             return [
-                { label: qsTr("Allow once"), accented: true, action: () => view.ai.allow(false) },
-                { label: qsTr("Allow this session"), action: () => view.ai.allow(true) },
+                { label: qsTr("Allow, and stop asking"), accented: true,
+                  action: () => view.ai.allowEverything() },
+                { label: qsTr("Just this once"), action: () => view.ai.allow(false) },
                 { label: qsTr("No"), destructive: true, action: () => view.ai.deny() }
             ]
         case "done":

@@ -33,7 +33,8 @@ Item {
     implicitHeight: Cfg.collapsedHeight
     implicitWidth: Cfg.idleMode === "hidden"
                    ? 0
-                   : Math.max(Cfg.collapsedWidth, content.implicitWidth + 28)
+                   : Math.max(Cfg.collapsedWidth,
+                              content.implicitWidth + Math.max(28, Theme.edgeInset * 2))
 
     Row {
         id: content

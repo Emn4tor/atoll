@@ -64,7 +64,5 @@
   "62": "Packaging",
   "63": "ConditionalRead",
   "64": "PermissionBroker::PermissionBroker",
-  "65": "devices",
-  "66": "progress",
-  "67": "onBusMessage"
+  "65": "devices"
 }

@@ -193,12 +193,12 @@ Machine details:
     return prompt;
 }
 
-QString AiToolbox::clientAddendum()
+QString AiToolbox::clientAddendum(bool screenshotAllowed)
 {
     const QString memoryPath = QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
                                    .filePath(u"atoll/assistant-memory.md"_s);
 
-    return uR"(
+    QString prompt = uR"(
 You are running here through the Claude Code client, which means you carry out
 your own tool calls rather than handing them back. Four things follow:
 
@@ -218,6 +218,27 @@ your own tool calls rather than handing them back. Four things follow:
 
 To remember something about this person for next time, append a line to %1.
 )"_s.arg(memoryPath);
+
+    // Being asked what is on the screen and answering "send me a screenshot"
+    // is the wrong answer twice over: the user is sitting in front of the
+    // thing being asked about, and the assistant can see it whenever they say
+    // it may. So the way to look is spelled out, and asking instead is ruled
+    // out in as many words.
+    const QString atollctl = QStandardPaths::findExecutable(u"atollctl"_s);
+    if (screenshotAllowed && !atollctl.isEmpty()) {
+        prompt += u"\nWhen the question is about what is on the screen - \"what do you see\", "
+                  "\"what is this window\", \"why does this look wrong\" - look for yourself: run "
+                  "`%1 screenshot`, which prints the path of a PNG, and then open that path to see "
+                  "it. The user is asked once before the picture is taken. Never tell them to take "
+                  "a screenshot or to send you one; fetching it is your job, not theirs.\n"_s
+                      .arg(atollctl);
+    } else {
+        prompt += u"\nYou cannot see the screen: looking at it is switched off in Atoll's "
+                  "settings. If you are asked what is on it, say that plainly - do not ask for a "
+                  "screenshot to be sent to you.\n"_s;
+    }
+
+    return prompt;
 }
 
 QJsonArray AiToolbox::definitions(bool screenshotAllowed)

@@ -81,7 +81,7 @@ ClaudeCliProvider::ClaudeCliProvider(QObject *parent)
 
 ClaudeCliProvider::~ClaudeCliProvider()
 {
-    abort();
+    stopProcess(true);
 }
 
 QString ClaudeCliProvider::findExecutable(const QString &configured)
@@ -339,6 +339,11 @@ void ClaudeCliProvider::writeTurn(const AiTurn &turn)
 
 void ClaudeCliProvider::abort()
 {
+    stopProcess(false);
+}
+
+void ClaudeCliProvider::stopProcess(bool wait)
+{
     m_turnInFlight = false;
     if (!m_process) {
         return;
@@ -348,14 +353,25 @@ void ClaudeCliProvider::abort()
     m_buffer.clear();
 
     // Nothing it says from here belongs to a conversation anybody can still
-    // see, so it is cut loose rather than waited for: the island has to stay
-    // responsive while a client that is in the middle of something winds down.
+    // see, so it is cut loose rather than listened to.
     process->disconnect(this);
-    connect(process, &QProcess::finished, process, &QObject::deleteLater);
     // Closing the input is how the client is meant to be told the conversation
     // is over; the rest is for the case where it is busy and does not notice.
     process->closeWriteChannel();
     process->terminate();
+
+    if (wait) {
+        if (!process->waitForFinished(1500)) {
+            process->kill();
+            process->waitForFinished(500);
+        }
+        delete process;
+        return;
+    }
+
+    // Cancelling is something a person did, and the island has to stay
+    // responsive while a client that is mid-command winds down.
+    connect(process, &QProcess::finished, process, &QObject::deleteLater);
     QTimer::singleShot(2000, process, [process] {
         if (process->state() != QProcess::NotRunning) {
             process->kill();

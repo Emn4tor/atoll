@@ -20,14 +20,15 @@ Item {
     signal dismissRequested()
 
     implicitHeight: 74
-    implicitWidth: Math.min(Cfg.maxWidth, Math.max(320, layout.implicitWidth + 34))
+    implicitWidth: Math.min(Cfg.maxWidth,
+                            Math.max(320, layout.implicitWidth + Math.max(34, Theme.edgeInset * 2)))
 
     Row {
         id: layout
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.leftMargin: 15
-        anchors.rightMargin: 15
+        anchors.leftMargin: Math.max(15, Theme.edgeInset)
+        anchors.rightMargin: Math.max(15, Theme.edgeInset)
         anchors.verticalCenter: parent.verticalCenter
         spacing: 12
 

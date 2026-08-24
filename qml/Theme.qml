@@ -29,6 +29,12 @@ QtObject {
     readonly property color accentFallback: Cfg.appearance.accentFallback ?? "#5aa2ff"
     property color dynamicAccent: accentFallback
 
+    /**
+     * How far in from the sides content has to stay to remain over the black.
+     * Written by the island, because only it knows how round it currently is.
+     */
+    property real edgeInset: 0
+
     readonly property color accent: {
         const configured = Cfg.appearance.accent ?? "auto"
         return configured === "auto" ? dynamicAccent : Qt.color(configured)

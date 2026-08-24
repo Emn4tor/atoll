@@ -23,7 +23,8 @@ Item {
     readonly property string phase: dragging ? "drop" : share.state
 
     implicitWidth: Math.min(Cfg.maxWidth,
-                            Math.max(300, (loader.item ? loader.item.implicitWidth : 0) + 44))
+                            Math.max(300, (loader.item ? loader.item.implicitWidth : 0)
+                                          + Math.max(44, Theme.edgeInset * 2)))
     implicitHeight: (loader.item ? loader.item.implicitHeight : 24) + 30
 
     function humanSize(bytes) {

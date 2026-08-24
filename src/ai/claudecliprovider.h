@@ -120,6 +120,12 @@ Q_SIGNALS:
 
 private:
     void start(const AiRequest &request);
+    /**
+     * Stop the running client. `wait` blocks until it is really gone, which is
+     * what shutting down needs - past that point there is no event loop left
+     * to reap it in, and an orphaned client would outlive the island.
+     */
+    void stopProcess(bool wait);
     void writeTurn(const AiTurn &turn);
     void consume();
     void handleLine(const QByteArray &line);

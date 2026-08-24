@@ -27,7 +27,9 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: 16
+        // The corner curve decides the minimum, so no card in the dashboard
+        // can end up half outside the black.
+        anchors.margins: Math.max(16, Theme.edgeInset)
         anchors.topMargin: 14
         spacing: 14
 
