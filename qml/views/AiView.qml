@@ -20,6 +20,10 @@ Item {
 
     signal dismissRequested()
 
+    // Hold focus whenever the composer TextInput is not visible
+    focus: !composer.visible
+    Keys.onEscapePressed: view.dismissRequested()
+
     readonly property int panelWidth: Math.min(Cfg.maxAiWidth, Cfg.get("ai.panelWidth", 560))
 
     implicitWidth: panelWidth
@@ -141,7 +145,14 @@ Item {
                         view.ai.ask(text)
                         text = ""
                     }
-                    Keys.onEscapePressed: view.dismissRequested()
+                    Keys.onEscapePressed: {
+                        // First Escape clears the draft; second dismisses.
+                        if (prompt.text.length === 0) {
+                            view.dismissRequested()
+                        } else {
+                            prompt.text = ""
+                        }
+                    }
                     Keys.onUpPressed: if (text.length === 0 && view.ai.question.length > 0) {
                         text = view.ai.question
                         cursorPosition = text.length
@@ -229,13 +240,12 @@ Item {
                 }
 
                 Text {
+                    id: thinkingLine
                     width: parent.width
                     visible: text.length > 0
                     text: {
                         switch (view.phase) {
                         case "setup":
-                            // The way in depends on which door the user is at:
-                            // one of them asks for nothing but a sign-in.
                             return view.ai.provider === "claude-cli"
                                    ? qsTr("Sign in once with Claude Code - no key to create - and the island can act on this machine.")
                                    : qsTr("Add a key for Claude or Gemini and the island can act on this machine.")
@@ -254,6 +264,22 @@ Item {
                     font.pixelSize: Theme.size(10)
                     elide: Text.ElideRight
                     maximumLineCount: 1
+
+                    onTextChanged: {
+                        if (view.phase === "thinking" && text.length > 0) {
+                            thinkFlash.restart()
+                        }
+                    }
+
+                    NumberAnimation {
+                        id: thinkFlash
+                        target: thinkingLine
+                        property: "opacity"
+                        from: 0.4
+                        to: 1.0
+                        duration: Theme.normal
+                        easing.type: Easing.OutCubic
+                    }
                 }
             }
         }
@@ -285,31 +311,51 @@ Item {
         }
 
         // ---- the answer ---------------------------------------------------
-        Flickable {
+        // Wrapped in an Item 
+        Item {
+            id: answerArea
             width: parent.width
-            visible: answer.text.length > 0
+            readonly property string answerText: view.ai.answer
+            visible: answerText.length > 0
                      && (view.phase === "answering" || view.phase === "done"
                          || view.phase === "working" || view.phase === "thinking")
-            height: visible ? Math.min(answer.implicitHeight, 190) : 0
-            contentHeight: answer.implicitHeight
-            clip: true
-            boundsBehavior: Flickable.StopAtBounds
-            // Follow the text as it streams, but stop following the moment the
-            // user scrolls back to read something.
-            onContentHeightChanged: if (!moving && !flicking) {
-                contentY = Math.max(0, contentHeight - height)
+            height: visible ? Math.min(answerScroll.contentHeight, 190) : 0
+
+            Flickable {
+                id: answerScroll
+                anchors.fill: parent
+                contentHeight: answerLabel.implicitHeight
+                contentWidth: width
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                // Follow the text as it streams, stop when user scrolls
+                onContentHeightChanged: if (!moving && !flicking) {
+                    contentY = Math.max(0, contentHeight - height)
+                }
+
+                Text {
+                    id: answerLabel
+                    width: parent.width
+                    text: answerArea.answerText
+                    color: Theme.foreground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.size(12)
+                    wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
+                    lineHeight: 1.25
+                }
             }
 
-            Text {
-                id: answer
-                width: parent.width
-                text: view.ai.answer
-                color: Theme.foreground
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.size(12)
-                wrapMode: Text.Wrap
-                textFormat: Text.PlainText
-                lineHeight: 1.25
+            // Copy button: appears when the answer is complete.
+            RoundButton {
+                anchors.top: parent.top
+                anchors.right: parent.right
+                width: 20
+                height: 20
+                visible: view.phase === "done" && answerArea.answerText.length > 0
+                opacity: 0.65
+                icon: ["edit-copy", "clipboard"]
+                onClicked: App.copyText(answerArea.answerText)
             }
         }
 
