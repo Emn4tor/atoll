@@ -102,6 +102,11 @@ void IpcService::answerToolReview(const QString &token, const QString &verdictJs
     connection.send(review.request.createReply(verdictJson));
 }
 
+void IpcService::dismiss()
+{
+    Q_EMIT dismissRequested();
+}
+
 void IpcService::reloadConfig()
 {
     Q_EMIT reloadRequested();
