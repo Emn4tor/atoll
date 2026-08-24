@@ -45,7 +45,7 @@ public:
      * calls: it has no terminal, it starts somewhere of Atoll's choosing, and
      * the way it asks for administrator rights is not the way a script does.
      */
-    static QString clientAddendum();
+    static QString clientAddendum(bool screenshotAllowed);
 
     /** Carry out one call. Exactly one signal follows, eventually. */
     void execute(const AiToolCall &call, AiRisk risk);
@@ -76,4 +76,6 @@ private:
     ScreenCapture *m_capture = nullptr;
     /** The call a running command belongs to. */
     QString m_pending;
+    /** Which output the picture being taken is of, for the line that goes with it. */
+    QString m_captured;
 };

@@ -4,6 +4,8 @@
  */
 #include "ipcservice.h"
 
+#include "ai/screencapture.h"
+
 #include <QCoreApplication>
 #include <QDBusConnection>
 #include <QUuid>
@@ -77,29 +79,83 @@ void IpcService::ask(const QString &prompt)
     Q_EMIT askRequested(prompt);
 }
 
+QString IpcService::park(const QString &kind)
+{
+    // The answer depends on a person - approving a step, or agreeing to let
+    // the screen be looked at - so the method call is set aside and the reply
+    // sent whenever that person gets to it.
+    setDelayedReply(true);
+    const QString token = u"%1-%2"_s.arg(kind).arg(++m_reviewCounter);
+    m_reviews.insert(token, OpenReview{connection(), message()});
+    return token;
+}
+
+void IpcService::sendReply(const QString &token, const QString &value)
+{
+    const auto waiting = m_reviews.take(token);
+    if (waiting.request.type() == QDBusMessage::InvalidMessage) {
+        return;
+    }
+    QDBusConnection connection = waiting.connection;
+    connection.send(waiting.request.createReply(value));
+}
+
 QString IpcService::reviewToolCall(const QString &payload)
 {
     if (!calledFromDBus()) {
         return {};
     }
-    // The answer depends on a person, so the method call is parked and the
-    // reply sent from allow() or deny() whenever that person gets to it.
-    setDelayedReply(true);
-
-    const QString token = u"review-%1"_s.arg(++m_reviewCounter);
-    m_reviews.insert(token, OpenReview{connection(), message()});
-    Q_EMIT toolReviewRequested(payload, token);
+    Q_EMIT toolReviewRequested(payload, park(u"review"_s));
     return {};
+}
+
+QString IpcService::captureScreen(const QString &screen)
+{
+    if (!calledFromDBus()) {
+        return {};
+    }
+    Q_EMIT screenCaptureRequested(park(u"shot"_s), screen);
+    return {};
+}
+
+QString IpcService::askUser(const QString &question, const QStringList &options)
+{
+    if (!calledFromDBus()) {
+        return {};
+    }
+    Q_EMIT userChoiceRequested(park(u"ask"_s), question, options);
+    return {};
+}
+
+QString IpcService::listScreens()
+{
+    // Straight from the windowing system: this is a fact about the machine,
+    // not about the assistant, and nothing here has to be asked of anybody.
+    QStringList lines;
+    const QVariantList outputs = ScreenCapture::outputs();
+    for (const QVariant &entry : outputs) {
+        const QVariantMap output = entry.toMap();
+        lines.append(u"%1 %2x%3%4"_s.arg(output.value(u"name"_s).toString())
+                         .arg(output.value(u"width"_s).toInt())
+                         .arg(output.value(u"height"_s).toInt())
+                         .arg(output.value(u"primary"_s).toBool() ? u" (main)"_s : QString()));
+    }
+    return lines.join(u'\n');
 }
 
 void IpcService::answerToolReview(const QString &token, const QString &verdictJson)
 {
-    const auto review = m_reviews.take(token);
-    if (review.request.type() == QDBusMessage::InvalidMessage) {
-        return;
-    }
-    QDBusConnection connection = review.connection;
-    connection.send(review.request.createReply(verdictJson));
+    sendReply(token, verdictJson);
+}
+
+void IpcService::answerScreenCapture(const QString &token, const QString &result)
+{
+    sendReply(token, result);
+}
+
+void IpcService::answerUserChoice(const QString &token, const QString &result)
+{
+    sendReply(token, result);
 }
 
 void IpcService::dismiss()

@@ -1,7 +1,7 @@
 {
   "packaging/atollctl": {
-    "mtime": 1787537902.585231,
-    "ast_hash": "080b1429699463604e0dd773738ad79e",
+    "mtime": 1787589147.0698016,
+    "ast_hash": "b4770e186d4db22451d894032dd7620b",
     "semantic_hash": ""
   },
   "scripts/install.sh": {
@@ -20,23 +20,23 @@
     "semantic_hash": ""
   },
   "src/ai/aiservice.cpp": {
-    "mtime": 1787542026.952089,
-    "ast_hash": "60f435b911c8c126d4a0635c706695e1",
+    "mtime": 1787589633.9624875,
+    "ast_hash": "43e823277980d7acc0c1a246a17615a9",
     "semantic_hash": ""
   },
   "src/ai/aiservice.h": {
-    "mtime": 1787541893.388044,
-    "ast_hash": "5a5a8b36745ce1e0a574379e64a89ad4",
+    "mtime": 1787589351.0488896,
+    "ast_hash": "f66d2aaf90289f2062097d18c35a7d01",
     "semantic_hash": ""
   },
   "src/ai/aitools.cpp": {
-    "mtime": 1787542026.9219937,
-    "ast_hash": "682b69874aaeae5d37688879612f7bd8",
+    "mtime": 1787590341.4298906,
+    "ast_hash": "ffa493aebf02cd32c19c10fde4574575",
     "semantic_hash": ""
   },
   "src/ai/aitools.h": {
-    "mtime": 1787542026.9217181,
-    "ast_hash": "7c2c165c9708f8366898a6fe01edbd03",
+    "mtime": 1787589052.9047084,
+    "ast_hash": "417b857b1514f8e1abb36a19a7f74ebd",
     "semantic_hash": ""
   },
   "src/ai/aitypes.h": {
@@ -55,13 +55,13 @@
     "semantic_hash": ""
   },
   "src/ai/claudecliprovider.cpp": {
-    "mtime": 1787541803.941572,
-    "ast_hash": "706bd5b902741d1bb8047bbf65741222",
+    "mtime": 1787543867.358184,
+    "ast_hash": "066e68239f13f37c374d65194b6bdbce",
     "semantic_hash": ""
   },
   "src/ai/claudecliprovider.h": {
-    "mtime": 1787541667.3246303,
-    "ast_hash": "cf93080850a148c65fb993d953051eda",
+    "mtime": 1787543867.3579159,
+    "ast_hash": "dec8c4614c4a1dff23367aa7ac4a1796",
     "semantic_hash": ""
   },
   "src/ai/commandrunner.cpp": {
@@ -95,13 +95,13 @@
     "semantic_hash": ""
   },
   "src/ai/permissionbroker.cpp": {
-    "mtime": 1787542011.3718808,
-    "ast_hash": "6b12ad5b55f69dc739bac1cf85c43dc8",
+    "mtime": 1787589073.57555,
+    "ast_hash": "43fc5d596687778895a5cbb9d18e3ec1",
     "semantic_hash": ""
   },
   "src/ai/permissionbroker.h": {
-    "mtime": 1787535626.6662774,
-    "ast_hash": "491fbca1f823b1c5433649da8ad62e71",
+    "mtime": 1787543604.710083,
+    "ast_hash": "660ed4cd8abacd70c25f00bb24c78432",
     "semantic_hash": ""
   },
   "src/ai/permissionhook.cpp": {
@@ -115,18 +115,18 @@
     "semantic_hash": ""
   },
   "src/ai/screencapture.cpp": {
-    "mtime": 1787536404.2745254,
-    "ast_hash": "718346198a1ce23cff6e3daab8a8c2ab",
+    "mtime": 1787588797.916246,
+    "ast_hash": "5e9b3e3ae27bd022f5509d85758eca99",
     "semantic_hash": ""
   },
   "src/ai/screencapture.h": {
-    "mtime": 1787535841.5972888,
-    "ast_hash": "77d5a38f2c2bb8ffa7b0ef4031a16650",
+    "mtime": 1787588797.9164135,
+    "ast_hash": "c394a725efacaaa5ee59605b46744a07",
     "semantic_hash": ""
   },
   "src/app/application.cpp": {
-    "mtime": 1787542235.8584929,
-    "ast_hash": "a8605d2f86e385eddc5eefaa2b5fa579",
+    "mtime": 1787589131.7121425,
+    "ast_hash": "81cb68cc63080268aaca03d3d2cc9d15",
     "semantic_hash": ""
   },
   "src/app/application.h": {
@@ -235,13 +235,13 @@
     "semantic_hash": ""
   },
   "src/ipc/ipcservice.cpp": {
-    "mtime": 1787541826.8504143,
-    "ast_hash": "1ec822447904cc872df5f1e542247058",
+    "mtime": 1787589185.1159732,
+    "ast_hash": "3094160a0820ee8c93aa82c38a512cd8",
     "semantic_hash": ""
   },
   "src/ipc/ipcservice.h": {
-    "mtime": 1787542100.6189828,
-    "ast_hash": "a1e8a6528f5c11503d03da8ce4fb4e55",
+    "mtime": 1787589108.6887455,
+    "ast_hash": "a3ca3e7a560eb7cd7132e8b4d6367831",
     "semantic_hash": ""
   },
   "src/main.cpp": {
@@ -370,8 +370,8 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1787542673.948722,
-    "ast_hash": "e7aaf5b6d2ad223d7700ac834f24ff8b",
+    "mtime": 1787590287.9516323,
+    "ast_hash": "acb68501acf8aefd0e313331c1ec98a7",
     "semantic_hash": ""
   },
   "packaging/README.md": {

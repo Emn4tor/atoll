@@ -19,6 +19,9 @@ Usage: atollctl <command> [arguments]
   share <file> [file...]       offer files to nearby devices
   assistant                    open the assistant with an empty box
   ask <question>               put a question to the assistant
+  screenshot [output|all]      take a picture of one screen, print its path
+  screens                      list the outputs a picture can be taken of
+  choose <question> <answer>.. put a question on the island, print the answer
   settings                     open the settings window
   reload                       re-read ~/.config/atoll/atoll.json
   version                      print the running version
@@ -29,6 +32,8 @@ Examples:
   atollctl progress cloud-upload 64 "Uploading"
   atollctl share ~/Pictures/holiday.jpg
   atollctl ask "why is my laptop fan so loud"
+  atollctl screenshot DP-1
+  atollctl choose "Which editor should I set up?" "Kate" "Neovim" "VS Code"
   atollctl settings
 
 Binding `atollctl assistant` to a key in System Settings gives the assistant a
@@ -63,6 +68,42 @@ case "$command" in
     version)
         gdbus call --session --dest "$BUS_NAME" --object-path "$OBJECT" \
             --method "$IFACE.version" | tr -d "(),'"
+        ;;
+    screenshot)
+        # The desktop asks for consent itself and a person has to answer it -
+        # and on a machine with several monitors they are asked which one they
+        # mean first - so the wait is far longer than the default. What comes
+        # back is the path the picture was written to, or a line starting
+        # "error:". An output may be named, or "all" for every screen at once.
+        result=$(gdbus call --timeout 600 --session --dest "$BUS_NAME" \
+            --object-path "$OBJECT" --method "$IFACE.captureScreen" "${1-}" | tr -d "(),'")
+        printf '%s\n' "$result"
+        case "$result" in
+            error:*) exit 1 ;;
+        esac
+        ;;
+    screens)
+        gdbus call --session --dest "$BUS_NAME" --object-path "$OBJECT" \
+            --method "$IFACE.listScreens" | sed "s/^('//; s/',)$//" | sed 's/\\n/\n/g'
+        ;;
+    choose)
+        # A question and its answers. The reply is whichever answer the user
+        # tapped on the island, so the wait is as long as a person takes.
+        [ $# -ge 3 ] || { usage; exit 1; }
+        question=$1
+        shift
+        list=""
+        for option in "$@"; do
+            escaped=$(printf '%s' "$option" | sed "s/'/\\\\'/g")
+            list="$list'$escaped',"
+        done
+        result=$(gdbus call --timeout 600 --session --dest "$BUS_NAME" \
+            --object-path "$OBJECT" --method "$IFACE.askUser" "$question" \
+            "[${list%,}]" | tr -d "(),'")
+        printf '%s\n' "$result"
+        case "$result" in
+            error:*) exit 1 ;;
+        esac
         ;;
     text)
         [ $# -eq 2 ] || { usage; exit 1; }

@@ -13,7 +13,9 @@
 #include "ai/screencapture.h"
 #include "config/config.h"
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QGuiApplication>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -21,6 +23,8 @@
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTimer>
+
+#include <memory>
 
 using namespace Qt::StringLiterals;
 
@@ -115,6 +119,19 @@ AiService::AiService(Config *config, QObject *parent)
     connect(m_toolbox, &AiToolbox::messageRequested, this, &AiService::messageRequested);
 
     connect(m_config, &Config::changed, this, &AiService::configurationChanged);
+
+    // Where the "which screen" question starts from. It is a starting point
+    // rather than the answer: the user's own answer, given on the island,
+    // holds for the conversation it was given in and no longer.
+    m_screenChoice = m_config->value(u"ai.screen"_s, u"ask"_s).toString();
+
+    // Plugging a monitor in changes what "which screen" can be answered with,
+    // and the question may be on the island while it happens.
+    if (auto *gui = qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
+        connect(gui, &QGuiApplication::screenAdded, this, &AiService::screensChanged);
+        connect(gui, &QGuiApplication::screenRemoved, this, &AiService::screensChanged);
+        connect(gui, &QGuiApplication::primaryScreenChanged, this, &AiService::screensChanged);
+    }
 }
 
 AiService::~AiService() = default;
@@ -324,6 +341,221 @@ void AiService::setShareScreen(bool share)
     Q_EMIT shareScreenChanged();
 }
 
+QVariantList AiService::screens() const
+{
+    return ScreenCapture::outputs();
+}
+
+bool AiService::severalScreens() const
+{
+    return ScreenCapture::hasSeveralOutputs();
+}
+
+QString AiService::screenChoice() const
+{
+    return m_screenChoice;
+}
+
+void AiService::setScreenChoice(const QString &choice)
+{
+    const QString wanted = choice.isEmpty() ? u"ask"_s : choice;
+    if (m_screenChoice == wanted) {
+        return;
+    }
+    m_screenChoice = wanted;
+    Q_EMIT screensChanged();
+}
+
+QString AiService::screenSummary() const
+{
+    const QVariantList outputs = ScreenCapture::outputs();
+    if (outputs.size() < 2) {
+        return {};
+    }
+    QStringList lines;
+    for (const QVariant &entry : outputs) {
+        const QVariantMap output = entry.toMap();
+        lines.append(u"%1 (%2x%3)"_s.arg(output.value(u"name"_s).toString())
+                         .arg(output.value(u"width"_s).toInt())
+                         .arg(output.value(u"height"_s).toInt()));
+    }
+    return lines.join(u", "_s);
+}
+
+QVariantList AiService::screenOptions() const
+{
+    QVariantList options;
+    const QVariantList outputs = ScreenCapture::outputs();
+    const QString current = ScreenCapture::currentOutputName();
+    for (const QVariant &entry : outputs) {
+        const QVariantMap output = entry.toMap();
+        const QString name = output.value(u"name"_s).toString();
+        options.append(QVariantMap{
+            {u"id"_s, name},
+            // The one the pointer is on is almost always the one meant, so it
+            // is the one that looks like the answer.
+            {u"label"_s, name == current ? tr("This screen") : name},
+            {u"detail"_s, ScreenCapture::labelFor(name)},
+            {u"accented"_s, name == current},
+        });
+    }
+    // Last, and deliberately unremarkable: a picture of four monitors at once
+    // is a picture in which nothing can be read.
+    options.append(QVariantMap{
+        {u"id"_s, u"all"_s},
+        {u"label"_s, tr("All of them")},
+        {u"detail"_s, tr("One wide picture, so everything on it is smaller.")},
+    });
+    return options;
+}
+
+QString AiService::resolveScreen(const QString &choice) const
+{
+    if (choice.compare(u"current"_s, Qt::CaseInsensitive) == 0) {
+        const QString current = ScreenCapture::currentOutputName();
+        return current.isEmpty() ? u"all"_s : current;
+    }
+    if (ScreenCapture::hasOutput(choice)) {
+        return choice;
+    }
+    return u"all"_s;
+}
+
+void AiService::withChosenScreen(const QString &requested, std::function<void(const QString &)> then)
+{
+    QString wanted = requested.trimmed();
+    if (wanted.isEmpty()) {
+        wanted = m_screenChoice;
+    }
+    if (wanted.isEmpty()) {
+        wanted = u"ask"_s;
+    }
+
+    const bool asking = wanted.compare(u"ask"_s, Qt::CaseInsensitive) == 0;
+    if (!asking || !ScreenCapture::hasSeveralOutputs()) {
+        then(resolveScreen(asking ? u"all"_s : wanted));
+        return;
+    }
+
+    askChoice(tr("Which screen shall I look at?"), screenOptions(), [this, then](const QString &id) {
+        if (id.isEmpty()) {
+            then(QString{});
+            return;
+        }
+        // The answer holds for the rest of the conversation: somebody who has
+        // said "the right-hand one" once is not asking to be asked again two
+        // questions later.
+        setScreenChoice(id);
+        then(resolveScreen(id));
+    });
+}
+
+void AiService::takeScreenshot(const QString &screenName,
+                               std::function<void(const QByteArray &)> onImage,
+                               std::function<void(const QString &)> onError)
+{
+    auto *capture = new ScreenCapture(this);
+    capture->setMaxEdge(m_config->value(u"ai.screenshotMaxEdge"_s, 1568).toInt());
+    connect(capture, &ScreenCapture::captured, this, [capture, onImage](const QByteArray &png) {
+        capture->deleteLater();
+        onImage(png);
+    });
+    connect(capture, &ScreenCapture::failed, this, [capture, onError](const QString &reason) {
+        capture->deleteLater();
+        onError(reason);
+    });
+    capture->capture(screenName);
+}
+
+// ---- questions with buttons ----------------------------------------------
+
+void AiService::askChoice(const QString &question,
+                          const QVariantList &options,
+                          std::function<void(const QString &)> then)
+{
+    // Two questions cannot share the island. The one already there is older,
+    // so it keeps its place and the new one is refused rather than queued -
+    // every caller of this can deal with not being answered.
+    if (m_choiceThen) {
+        then(QString{});
+        return;
+    }
+
+    m_choiceQuestion = question;
+    m_choiceOptions = options;
+    m_choiceThen = std::move(then);
+    m_stateBeforeChoice = m_state;
+
+    // A question is worth surfacing even when the user has looked away: it is
+    // the one thing in the conversation that cannot make progress without them.
+    if (m_background) {
+        m_background = false;
+        m_engaged = true;
+    }
+    m_engaged = true;
+    setState(u"choosing"_s);
+    Q_EMIT choiceChanged();
+    Q_EMIT stateChanged();
+}
+
+void AiService::choose(const QString &id)
+{
+    if (!m_choiceThen) {
+        return;
+    }
+    // Only an option that was actually offered counts; anything else is the
+    // question being walked away from.
+    bool offered = false;
+    for (const QVariant &entry : std::as_const(m_choiceOptions)) {
+        if (entry.toMap().value(u"id"_s).toString() == id) {
+            offered = true;
+            break;
+        }
+    }
+
+    auto then = std::move(m_choiceThen);
+    m_choiceThen = nullptr;
+    m_choiceQuestion.clear();
+    m_choiceOptions.clear();
+    Q_EMIT choiceChanged();
+    if (m_state == u"choosing"_s) {
+        setState(m_stateBeforeChoice.isEmpty() ? u"working"_s : m_stateBeforeChoice);
+    }
+    then(offered ? id : QString{});
+}
+
+void AiService::pickScreen()
+{
+    if (!ScreenCapture::hasSeveralOutputs()) {
+        return;
+    }
+    m_engaged = true;
+    m_background = false;
+    // "ask" whatever is set, because being asked is the point of the button.
+    askChoice(tr("Which screen shall I look at?"), screenOptions(), [this](const QString &id) {
+        if (!id.isEmpty()) {
+            setScreenChoice(id);
+        }
+        if (m_state == u"choosing"_s) {
+            setState(u"composing"_s);
+        }
+        Q_EMIT focusRequested();
+    });
+}
+
+void AiService::abandonChoice()
+{
+    if (!m_choiceThen) {
+        return;
+    }
+    auto then = std::move(m_choiceThen);
+    m_choiceThen = nullptr;
+    m_choiceQuestion.clear();
+    m_choiceOptions.clear();
+    Q_EMIT choiceChanged();
+    then(QString{});
+}
+
 // ---- state ---------------------------------------------------------------
 
 bool AiService::glowing() const
@@ -334,7 +566,7 @@ bool AiService::glowing() const
 bool AiService::busy() const
 {
     return m_state == u"thinking"_s || m_state == u"answering"_s || m_state == u"working"_s
-        || m_state == u"permission"_s;
+        || m_state == u"permission"_s || m_state == u"choosing"_s;
 }
 
 int AiService::exchanges() const
@@ -346,6 +578,11 @@ int AiService::exchanges() const
         }
     }
     return count;
+}
+
+bool AiService::unattended() const
+{
+    return m_broker->grantedEverything();
 }
 
 QString AiService::pendingTier() const
@@ -481,6 +718,7 @@ void AiService::startOver()
     m_error.clear();
     m_rounds = 0;
     m_broker->revokeAll();
+    setScreenChoice(m_config->value(u"ai.screen"_s, u"ask"_s).toString());
     setState(u"composing"_s);
     Q_EMIT stepsChanged();
     Q_EMIT answerChanged();
@@ -489,6 +727,12 @@ void AiService::startOver()
 
 void AiService::cancel()
 {
+    // Whoever is waiting on a question - the model, or a command sitting on
+    // the other end of the bus - has to be told, but nothing they are told may
+    // start the conversation up again.
+    m_cancelling = true;
+    abandonChoice();
+
     m_anthropic->abort();
     m_gemini->abort();
     m_cli->abort();
@@ -512,6 +756,7 @@ void AiService::cancel()
     if (m_state != u"composing"_s && m_state != u"setup"_s) {
         setState(m_answer.isEmpty() ? u"composing"_s : u"done"_s);
     }
+    m_cancelling = false;
 }
 
 void AiService::ask(const QString &text)
@@ -546,46 +791,72 @@ void AiService::ask(const QString &text)
     m_history.append(turn);
 
     if (m_shareScreen) {
-        // The picture has to be taken before the question is sent, and taking
-        // it may put a portal dialog in front of the user first.
+        // The picture has to be taken before the question is sent, which may
+        // mean asking which screen is meant and then waiting on a portal
+        // dialog. Both are worth showing as work rather than as a pause.
         setState(u"working"_s);
-        setActivity(tr("Taking a picture of the screen…"));
-        auto *capture = new ScreenCapture(this);
-        connect(capture, &ScreenCapture::captured, this, [this, capture](const QByteArray &png) {
-            capture->deleteLater();
-            if (!m_history.isEmpty()) {
-                if (activeBackend()->drivesTools()) {
-                    // The client reads pictures off disk rather than out of a
-                    // message, so the screenshot is left somewhere it can open
-                    // and the question says where.
-                    const QString path =
-                        QDir(ClaudeCliProvider::workspacePath()).filePath(u"screen.png"_s);
-                    QFile file(path);
-                    if (file.open(QIODevice::WriteOnly)) {
-                        file.write(png);
-                        file.close();
-                        m_history.last().text +=
-                            tr("\n\n(A picture of the screen as it is right now has been saved to "
-                               "%1. Open it to see what I am looking at.)")
-                                .arg(path);
-                    }
-                } else {
-                    m_history.last().image = png;
-                    m_history.last().imageMediaType = u"image/png"_s;
-                }
+        withChosenScreen({}, [this](const QString &screenName) {
+            if (m_cancelling) {
+                return;
             }
-            setShareScreen(false);
-            setActivity({});
-            runTurn();
+            if (screenName.isEmpty()) {
+                // The screen question was closed. The question that was typed
+                // is still a question, so it goes without the picture rather
+                // than being thrown away with it.
+                setShareScreen(false);
+                setActivity({});
+                addStep(u"note"_s, tr("Asked without a picture of the screen."), u"denied"_s);
+                runTurn();
+                return;
+            }
+
+            setActivity(tr("Taking a picture of the screen…"));
+            takeScreenshot(
+                screenName,
+                [this, screenName](const QByteArray &png) {
+                    if (m_cancelling) {
+                        return;
+                    }
+                    if (!m_history.isEmpty()) {
+                        const QString what = screenName == u"all"_s
+                            ? tr("every screen")
+                            : ScreenCapture::labelFor(screenName);
+                        if (activeBackend()->drivesTools()) {
+                            // The client reads pictures off disk rather than
+                            // out of a message, so the screenshot is left
+                            // somewhere it can open and the question says where.
+                            const QString path =
+                                QDir(ClaudeCliProvider::workspacePath()).filePath(u"screen.png"_s);
+                            QFile file(path);
+                            if (file.open(QIODevice::WriteOnly)) {
+                                file.write(png);
+                                file.close();
+                                m_history.last().text +=
+                                    tr("\n\n(A picture of %1 as it is right now has been saved to "
+                                       "%2. Open it to see what I am looking at.)")
+                                        .arg(what, path);
+                            }
+                        } else {
+                            m_history.last().image = png;
+                            m_history.last().imageMediaType = u"image/png"_s;
+                            m_history.last().text +=
+                                tr("\n\n(The picture attached is of %1.)").arg(what);
+                        }
+                    }
+                    setShareScreen(false);
+                    setActivity({});
+                    runTurn();
+                },
+                [this](const QString &reason) {
+                    if (m_cancelling) {
+                        return;
+                    }
+                    setShareScreen(false);
+                    addStep(u"note"_s, reason, u"failed"_s);
+                    setActivity({});
+                    runTurn();
+                });
         });
-        connect(capture, &ScreenCapture::failed, this, [this, capture](const QString &reason) {
-            capture->deleteLater();
-            setShareScreen(false);
-            addStep(u"note"_s, reason, u"failed"_s);
-            setActivity({});
-            runTurn();
-        });
-        capture->capture();
         return;
     }
 
@@ -621,7 +892,9 @@ void AiService::runTurn()
     // it stops itself.
     if (target->drivesTools()) {
         request.tools = {};
-        request.systemPrompt += AiToolbox::clientAddendum();
+        request.systemPrompt +=
+            AiToolbox::clientAddendum(m_config->value(u"ai.allowScreenshots"_s, true).toBool()
+                                      && ScreenCapture::available());
     }
 
     setState(m_answer.isEmpty() ? u"thinking"_s : u"answering"_s);
@@ -729,12 +1002,112 @@ void AiService::advanceQueue()
 
 void AiService::executeNow(const AiToolCall &call, const AiVerdict &verdict)
 {
+    // Putting a question to the user is not something the toolbox can carry
+    // out: it ends with a button being tapped on the island, and the toolbox
+    // has no island. So it is answered here instead.
+    if (call.name == u"ask_user"_s) {
+        presentQuestion(call);
+        return;
+    }
+
+    // Which screen, when the machine has more than one and nobody has said.
+    // Asking beats guessing: a picture of the wrong monitor is a wasted turn,
+    // and a picture of all of them is one nothing can be read on.
+    if (call.name == u"take_screenshot"_s) {
+        AiToolCall wanted = call;
+        withChosenScreen(call.input.value(u"screen"_s).toString(),
+                         [this, wanted, verdict](const QString &screenName) mutable {
+                             if (screenName.isEmpty()) {
+                                 finishToolLocally(wanted,
+                                                   tr("The user closed the question about which "
+                                                      "screen to look at, so no picture was taken."),
+                                                   true);
+                                 return;
+                             }
+                             wanted.input.insert(u"screen"_s, screenName);
+                             const QString what = screenName == u"all"_s
+                                 ? tr("Look at every screen")
+                                 : tr("Look at %1").arg(screenName);
+                             addStep(u"tool"_s, what, u"running"_s);
+                             setActivity(what);
+                             setState(u"working"_s);
+                             m_toolbox->execute(wanted, verdict.risk);
+                         });
+        return;
+    }
+
     addStep(u"tool"_s,
             verdict.summary.isEmpty() ? call.name : verdict.summary,
             verdict.risk == AiRisk::Admin ? u"elevated"_s : u"running"_s);
     setActivity(verdict.summary.isEmpty() ? call.name : verdict.summary);
     setState(u"working"_s);
     m_toolbox->execute(call, verdict.risk);
+}
+
+void AiService::presentQuestion(const AiToolCall &call)
+{
+    const QString question = call.input.value(u"question"_s).toString().trimmed();
+    QStringList labels;
+    const QStringList given = call.input.value(u"options"_s).toStringList();
+    for (const QString &label : given) {
+        const QString trimmed = label.trimmed();
+        // The island is a pill: five short answers is already a lot, and a
+        // paragraph on a button is not an answer anybody can pick out.
+        if (!trimmed.isEmpty() && labels.size() < 5) {
+            labels.append(trimmed.left(48));
+        }
+    }
+
+    if (question.isEmpty() || labels.size() < 2) {
+        finishToolLocally(call,
+                          tr("A question needs one line of text and between two and five options. "
+                             "Ask again with both, or just say what you were going to ask."),
+                          true);
+        return;
+    }
+
+    QVariantList options;
+    for (int index = 0; index < labels.size(); ++index) {
+        options.append(QVariantMap{{u"id"_s, u"option-%1"_s.arg(index)},
+                                   {u"label"_s, labels.at(index)},
+                                   // The first one is the assistant's own
+                                   // suggestion, and looks like it.
+                                   {u"accented"_s, index == 0}});
+    }
+
+    // No step goes in while the question is up: it is already the headline on
+    // the island, and a list underneath repeating it back is the same sentence
+    // twice. What is worth keeping is the answer, so that is what is written
+    // down, once there is one.
+    askChoice(question, options, [this, call, question, labels](const QString &id) {
+        const int index = id.startsWith(u"option-"_s) ? id.mid(7).toInt() : -1;
+        if (index < 0 || index >= labels.size()) {
+            addStep(u"question"_s, question, u"denied"_s);
+            finishToolLocally(call,
+                              tr("The user closed the question instead of answering it. Do not ask "
+                                 "it again; carry on with what you can, or stop and say why you "
+                                 "cannot."),
+                              true);
+            return;
+        }
+        addStep(u"question"_s, u"%1 → %2"_s.arg(question, labels.at(index)), u"done"_s);
+        finishToolLocally(call, tr("The user chose: %1").arg(labels.at(index)), false);
+    });
+}
+
+void AiService::finishToolLocally(const AiToolCall &call, const QString &content, bool isError)
+{
+    if (m_cancelling) {
+        return; // The conversation this belonged to is being taken down.
+    }
+    AiToolResult result;
+    result.id = call.id;
+    result.content = content;
+    result.isError = isError;
+    m_results.append(result);
+    setActivity({});
+    setState(u"working"_s);
+    advanceQueue();
 }
 
 void AiService::allow(bool rememberForSession)
@@ -762,6 +1135,18 @@ void AiService::allow(bool rememberForSession)
     }
 
     executeNow(m_current, verdict);
+}
+
+void AiService::allowEverything()
+{
+    if (!m_awaitingPermission) {
+        return;
+    }
+    m_broker->grantEverythingForSession();
+    // Everything queued behind this one is now pre-approved as well, and
+    // allow() drains the queue for us.
+    allow(false);
+    Q_EMIT stateChanged();
 }
 
 void AiService::deny()
@@ -859,6 +1244,119 @@ void AiService::reviewToolCall(const QString &payload, const QString &token)
 
     m_reviews.enqueue(PendingReview{token, call, verdict});
     showNextReview();
+}
+
+void AiService::captureScreenFor(const QString &token, const QString &screenName)
+{
+    // Exactly one answer goes back, whichever way this ends. The caller is a
+    // command sitting there waiting, and a screenshot that neither arrives nor
+    // fails would hold the whole conversation open behind it.
+    auto answered = std::make_shared<bool>(false);
+    const auto answer = [this, token, answered](const QString &result) {
+        if (*answered) {
+            return;
+        }
+        *answered = true;
+        setActivity({});
+        Q_EMIT screenCaptureAnswered(token, result);
+    };
+    const auto fail = [answer](const QString &reason) {
+        answer(u"error: "_s + reason);
+    };
+
+    if (!m_config->value(u"ai.allowScreenshots"_s, true).toBool()) {
+        fail(tr("the user has switched off letting the assistant look at the screen."));
+        return;
+    }
+    if (!ScreenCapture::available()) {
+        fail(tr("nothing on this machine can take a screenshot."));
+        return;
+    }
+    if (!screenName.isEmpty() && !ScreenCapture::hasOutput(screenName)
+        && screenName.compare(u"all"_s, Qt::CaseInsensitive) != 0
+        && screenName.compare(u"current"_s, Qt::CaseInsensitive) != 0) {
+        fail(tr("there is no screen called %1. There is %2.")
+                 .arg(screenName, screenSummary()));
+        return;
+    }
+
+    // Always the same file. The assistant reads it straight after asking for
+    // it, so keeping one around beats leaving a trail of pictures of somebody's
+    // screen in a temporary directory.
+    const QString target = QDir(ClaudeCliProvider::workspacePath()).filePath(u"screen.png"_s);
+
+    withChosenScreen(screenName, [this, target, answer, fail](const QString &chosen) {
+        if (chosen.isEmpty()) {
+            fail(tr("the user closed the question about which screen to look at."));
+            return;
+        }
+
+        setActivity(tr("Taking a picture of the screen…"));
+        takeScreenshot(
+            chosen,
+            [target, answer, fail](const QByteArray &png) {
+                QFile file(target);
+                if (!file.open(QIODevice::WriteOnly)) {
+                    fail(QCoreApplication::translate("AiService",
+                                                     "the picture could not be written to %1.")
+                             .arg(target));
+                    return;
+                }
+                file.write(png);
+                file.close();
+                answer(target);
+            },
+            fail);
+
+        // The consent dialog belongs to the desktop and there is no telling
+        // whether anybody is in front of it. Waiting a minute for an answer is
+        // generous; waiting for ever is a hung assistant.
+        QTimer::singleShot(60000, this, [fail] {
+            fail(QCoreApplication::translate(
+                "AiService", "nobody answered the desktop's request to share the screen."));
+        });
+    });
+}
+
+void AiService::askUserFor(const QString &token,
+                           const QString &question,
+                           const QStringList &options)
+{
+    const auto answer = [this, token](const QString &result) {
+        Q_EMIT userChoiceAnswered(token, result);
+    };
+
+    QStringList labels;
+    for (const QString &option : options) {
+        const QString trimmed = option.trimmed();
+        if (!trimmed.isEmpty() && labels.size() < 5) {
+            labels.append(trimmed.left(48));
+        }
+    }
+    if (question.trimmed().isEmpty() || labels.size() < 2) {
+        answer(u"error: "_s
+               + tr("a question needs one line of text and between two and five options."));
+        return;
+    }
+
+    QVariantList choices;
+    for (int index = 0; index < labels.size(); ++index) {
+        choices.append(QVariantMap{{u"id"_s, u"option-%1"_s.arg(index)},
+                                   {u"label"_s, labels.at(index)},
+                                   {u"accented"_s, index == 0}});
+    }
+
+    const QString asked = question.trimmed();
+    askChoice(asked, choices, [this, answer, labels, asked](const QString &picked) {
+        const int index = picked.startsWith(u"option-"_s) ? picked.mid(7).toInt() : -1;
+        if (index < 0 || index >= labels.size()) {
+            addStep(u"question"_s, asked, u"denied"_s);
+            answer(u"error: "_s + tr("the user closed the question without answering it."));
+            return;
+        }
+        addStep(u"question"_s, u"%1 → %2"_s.arg(asked, labels.at(index)), u"done"_s);
+        answer(labels.at(index));
+    });
 }
 
 void AiService::showNextReview()

@@ -41,7 +41,8 @@ Item {
     implicitHeight: Cfg.collapsedHeight
     implicitWidth: Cfg.idleMode === "hidden"
                    ? 0
-                   : Math.max(Cfg.collapsedWidth, content.implicitWidth + 28)
+                   : Math.max(Cfg.collapsedWidth,
+                              content.implicitWidth + Math.max(28, Theme.edgeInset * 2))
 
     Row {
         id: content
@@ -53,7 +54,9 @@ Item {
             visible: view.assistantBusy && Cfg.get("ai.avatar", true)
             size: 18
             mood: App.ai.state === "permission" ? "alert" : "working"
-            bodyColor: App.ai.state === "permission" ? Theme.critical : Theme.accent
+            // The assistant's own colour, not the album art's: it is the one
+            // thing on the pill that has nothing to do with what is playing.
+            bodyColor: App.ai.state === "permission" ? Theme.critical : Theme.assistantTint
         }
 
         AlbumArt {

@@ -23,13 +23,51 @@ Item {
                                                       y + (height - satelliteSize) / 2,
                                                       satelliteSize,
                                                       satelliteSize)
+    /**
+     * How round the corners are, worked out from what the island is currently
+     * holding rather than from which view is on it.
+     *
+     * The lozenge - half the height, the shape everybody recognises - is right
+     * for an island holding one row: a pill, an OSD, a line of text. It is
+     * wrong the moment there are rows stacked above each other, and wrong in a
+     * way that is easy to miss, because the corner then curves through the
+     * outermost row rather than around it. A 160px panel with an 80px corner
+     * has its bottom row of buttons hanging in mid air.
+     *
+     * So the test is the number of rows, not the aspect ratio: past one row
+     * the corner is a card's, proportional to the height and capped, and
+     * nothing is ever rounder than half the shorter side.
+     */
     readonly property real cornerRadius: {
+        const ceiling = Math.min(width, height) / 2
         const configured = Cfg.island.cornerRadius ?? 0
         if (configured > 0) {
-            return Math.min(configured, height / 2)
+            return Math.min(configured, ceiling)
         }
-        // The dashboard wants softened corners, not a lozenge.
-        return mode === "expanded" ? 26 : height / 2
+        if (height <= Cfg.collapsedHeight * 1.5) {
+            return ceiling
+        }
+        return Math.min(ceiling, Math.max(20, Math.min(height * 0.3, 32)))
+    }
+
+    /**
+     * How far the corner curve reaches in at the height where content actually
+     * sits - a dozen pixels from the edge, which is where the outermost row of
+     * a view ends up - rather than at the 45 degrees where the curve is easiest
+     * to reason about and least relevant.
+     *
+     * The difference is not academic: on an 80px corner the diagonal is 24px in
+     * and the row twelve pixels from the edge is 38px in. Views keep at least
+     * this much clear, which is what makes "inside the black" a property of the
+     * layout instead of something to be checked by eye afterwards.
+     */
+    readonly property real edgeInset: {
+        const r = cornerRadius
+        const row = 12
+        if (r <= row) {
+            return 0
+        }
+        return Math.ceil(r - Math.sqrt(r * r - (r - row) * (r - row)))
     }
 
     /**
@@ -290,6 +328,16 @@ Item {
                 busWarning.restart()
             }
         }
+    }
+
+    // Views are loaded rather than nested, so they cannot see the island they
+    // are sitting in. The inset the corners demand is published where they can
+    // read it, the same way the accent is.
+    Binding {
+        target: Theme
+        property: "edgeInset"
+        value: island.edgeInset
+        restoreMode: Binding.RestoreNone
     }
 
     // The accent follows the current cover art unless the user pinned a colour.

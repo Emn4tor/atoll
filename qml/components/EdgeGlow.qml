@@ -11,6 +11,14 @@ import Atoll
  * the desktop underneath look disabled, and it is not - the user can carry on
  * working while a long job runs. What the glow says is "something of yours is
  * listening", and a lit outline says that without taking the screen away.
+ *
+ * Its colour is fixed. It used to follow the album art, which meant the
+ * assistant looked different depending on what was playing and changed colour
+ * under somebody who was reading an answer; and its hue used to travel along
+ * the border, which is motion in the corner of the eye for as long as the
+ * panel is open. Both are gone. What is left is one gradient, from the colour
+ * at the island to the colour at the far corners, that fades in when the
+ * assistant opens and out when it closes.
  */
 Item {
     id: glow
@@ -23,13 +31,13 @@ Item {
     /** Thickness of the band in pixels, converted to the shader's units. */
     property real thickness: 130
 
-    property color colorA: Theme.accent
-    property color colorB: "#8f5bff"
-    property color colorC: "#4ad9c8"
+    /** The colour where the light leaves the island. */
+    property color colorNear: Cfg.get("ai.glowColor", "#5aa2ff")
+    /** What it has become by the far corners. */
+    property color colorFar: Cfg.get("ai.glowColorFar", "#8f5bff")
 
     /** Runs from 0 to past 1 as the light spreads out from the island. */
     property real progress: 0
-    property real clock: 0
 
     visible: opacity > 0.004
     opacity: lit ? 1 : 0
@@ -43,7 +51,6 @@ Item {
 
     onLitChanged: {
         if (lit) {
-            clock = 0
             progress = 0
             spread.restart()
         }
@@ -61,23 +68,16 @@ Item {
         easing.type: Easing.OutCubic
     }
 
-    FrameAnimation {
-        running: glow.visible
-        onTriggered: glow.clock += frameTime
-    }
-
     ShaderEffect {
         anchors.fill: parent
 
-        property real time: glow.clock
         property real intensity: glow.intensity
         property real thickness: parent.height > 0 ? glow.thickness / parent.height : 0.12
         property real progress: glow.progress
         property real aspect: parent.height > 0 ? parent.width / parent.height : 1.7
         property vector2d origin: Qt.vector2d(glow.originX, glow.originY)
-        property vector4d colorA: Qt.vector4d(glow.colorA.r, glow.colorA.g, glow.colorA.b, 1)
-        property vector4d colorB: Qt.vector4d(glow.colorB.r, glow.colorB.g, glow.colorB.b, 1)
-        property vector4d colorC: Qt.vector4d(glow.colorC.r, glow.colorC.g, glow.colorC.b, 1)
+        property vector4d colorNear: Qt.vector4d(glow.colorNear.r, glow.colorNear.g, glow.colorNear.b, 1)
+        property vector4d colorFar: Qt.vector4d(glow.colorFar.r, glow.colorFar.g, glow.colorFar.b, 1)
 
         blending: true
         fragmentShader: "qrc:/qt/qml/Atoll/shaders/edgeglow.frag.qsb"

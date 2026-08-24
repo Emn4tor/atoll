@@ -44,6 +44,23 @@ public:
 
     /** Remember an allowance for the rest of this session. */
     void grantForSession(const QString &grantKey);
+
+    /**
+     * Stop asking altogether for the rest of this conversation.
+     *
+     * This is the answer to a job rather than to a step: somebody who has said
+     * "yes, install it" does not want to be asked again about each of the four
+     * commands that installing it turns out to take. Every other rule still
+     * holds - what is refused outright stays refused, a tier the settings have
+     * switched off stays unreachable, and anything as root still goes through
+     * the desktop's own password dialog, which is not Atoll's to waive.
+     */
+    void grantEverythingForSession();
+    bool grantedEverything() const
+    {
+        return m_blanket;
+    }
+
     void revokeAll();
 
     /** Whether the tier is reachable at all with the current settings. */
@@ -58,4 +75,5 @@ private:
 
     Config *m_config = nullptr;
     QSet<QString> m_sessionGrants;
+    bool m_blanket = false;
 };

@@ -29,10 +29,27 @@ QtObject {
     readonly property color accentFallback: Cfg.appearance.accentFallback ?? "#5aa2ff"
     property color dynamicAccent: accentFallback
 
+    /**
+     * How far in from the sides content has to stay to remain over the black.
+     * Written by the island, because only it knows how round it currently is.
+     */
+    property real edgeInset: 0
+
     readonly property color accent: {
         const configured = Cfg.appearance.accent ?? "auto"
         return configured === "auto" ? dynamicAccent : Qt.color(configured)
     }
+
+    /**
+     * The assistant's own colour, which is deliberately not the accent.
+     *
+     * The accent follows the album art, and an assistant panel that changes
+     * colour with the music changes colour under somebody who is halfway
+     * through reading an answer in it. The assistant is the one thing on the
+     * island that is not about what is playing, so it is white and stays
+     * white.
+     */
+    readonly property color assistantTint: Cfg.appearance.assistantTint ?? "#ffffff"
 
     readonly property color critical: "#ff5f57"
     readonly property color positive: "#32d74b"

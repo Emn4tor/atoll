@@ -43,8 +43,8 @@ Item {
 
     // ---- clock -----------------------------------------------------------
     //
-    // One number drives every state; nothing accumulates. `entered` is when the
-    // current mood began, so each state animates from its own zero.
+    // One number drives every state; every pose is a function of it. `entered`
+    // is when the current mood began, so each state animates from its own zero.
     property real clock: 0
     /** When the current mood started. */
     property real entered: 0
@@ -53,25 +53,87 @@ Item {
     property real previousEntered: 0
     /** QML hands over the new value only, so the old one is kept by hand. */
     property string lastMood: "idle"
+    /** True once a mood has actually been left, so there is something to blend from. */
+    property bool hasPrevious: false
+    /** When a forced blink was triggered; a change of shape hides behind one. */
+    property real blinkAt: -10
+
+    /**
+     * The pose the last mood change interrupted, frozen.
+     *
+     * Only one mood of history is kept, so a change that lands while a blend is
+     * still running would otherwise start its own blend from the *full* pose of
+     * the mood being left rather than from the half-blended frame that is
+     * actually on screen. The reference measures that as a 36px jump against
+     * the 8px of ordinary movement, and it is exactly what the island does when
+     * it goes thinking -> working -> answering in quick succession.
+     *
+     * Freezing only in that case matters as much: freezing on every change
+     * would stop the outgoing mood's own animation dead for the whole blend.
+     */
+    property var frozen: null
 
     onMoodChanged: {
+        const now = clock
+        const blending = hasPrevious && (now - entered) < moodMorph(lastMood)
+        frozen = blending ? composed(now, lastMood, entered, previousMood, previousEntered, frozen)
+                          : null
         previousMood = lastMood
         previousEntered = entered
-        entered = clock
+        entered = now
         lastMood = mood
+        hasPrevious = true
+        if (blinksIn(mood)) {
+            blinkAt = now
+        }
         canvas.requestPaint()
     }
 
-    Timer {
-        // 30 Hz: the reference material was cut at ten frames a second, and a
-        // face this small gains nothing from sixty.
-        interval: 33
-        running: bot.visible && bot.alive
-        repeat: true
+    FrameAnimation {
+        // Driven by the render loop rather than by a timer.
+        //
+        // A timer that adds a fixed amount per tick runs at the rate the timer
+        // happens to fire, which is not the rate the screen refreshes at: under
+        // any load the two drift apart, and the face then moves in a way that
+        // looks like a fault in the animation rather than in the clock. Asking
+        // the frame how long it actually took costs nothing and is right.
+        running: bot.visible
         onTriggered: {
-            bot.clock += 0.033
+            // A frame that took absurdly long - the island was hidden, the
+            // session was suspended - must not teleport the animation.
+            bot.clock += Math.min(frameTime, 0.1)
             canvas.requestPaint()
         }
+    }
+
+    /**
+     * How long a mood takes to blend in, in seconds. Measured per state in the
+     * reference rather than shared, because a bunch of orbits arriving takes
+     * visibly longer to read than a pair of eyes narrowing.
+     */
+    function moodMorph(name) {
+        switch (name) {
+        case "thinking":
+            return 0.4
+        case "listening":
+            return 0.55
+        case "working":
+            return 0.6
+        case "alert":
+            return 0.45
+        case "notify":
+        case "done":
+        case "asleep":
+            return 0.5
+        default:
+            return 0.45
+        }
+    }
+
+    /** Whether arriving at this mood is hidden behind a blink, as in the video. */
+    function blinksIn(name) {
+        return name === "thinking" || name === "listening" || name === "notify"
+            || name === "done"
     }
 
     // ---- maths -----------------------------------------------------------
@@ -158,11 +220,10 @@ Item {
 
     /**
      * A pre-drawn blink schedule. Deterministic and stateless, so the picture
-     * at any instant depends only on the clock.
+     * at any instant depends only on the clock - and drawn here rather than on
+     * completion, so the very first frames already have one.
      */
-    property var blinks: []
-
-    Component.onCompleted: {
+    readonly property var blinks: (function () {
         let a = 0x5eed >>> 0
         const rng = () => {
             a = (a + 0x6d2b79f5) >>> 0
@@ -182,8 +243,8 @@ Item {
                 t += 0.24
             }
         }
-        blinks = out
-    }
+        return out
+    })()
 
     function blinkLid(t) {
         for (let i = 0; i < blinks.length; i++) {
@@ -249,18 +310,20 @@ Item {
             break
 
         case "working": {
+            // The orbits start from rest rather than at full speed: the time
+            // they are drawn at is eased in, so the bunch spins up instead of
+            // appearing already turning.
             const ramp = maths.easeInOutCubic(maths.clamp(t / 0.35))
-            const rot = -maths.tau * 1.25 * t * ramp
+            const spun = t * ramp
             const fade = maths.clamp(t / 0.8)
             base.gaze = { yaw: restGaze.yaw + Math.sin(t * 6.5) * 22, pitch: 12, roll: -13 }
             base.eyes = [{ w: 0.18, h: 0.38 }, { w: 0.18, h: 0.38 }]
             base.rings = ringSeeds.map((seed, i) => ({
                 seed: seed,
-                t: t,
+                t: spun,
                 opacity: fade * maths.clamp((t - i * 0.13) / 0.3)
             }))
             base.blink = false
-            void rot
             break
         }
 
@@ -307,9 +370,11 @@ Item {
         }
 
         case "asleep":
-            // A small ball bobbing gently, with no face at all.
+            // A small ball with no face, bouncing. The period is measured -
+            // 0.6s, not a round number - and so is the travel; slowing it down
+            // to look calmer is what makes it read as a stutter instead.
             base.radius = 0.1585
-            base.cy = 0.11 + Math.sin(t * (maths.tau / 0.9)) * 0.19
+            base.cy = 0.11 + Math.sin(t * (maths.tau / 0.6)) * 0.19
             base.eyeAlpha = 0
             base.blink = false
             break
@@ -319,6 +384,50 @@ Item {
         }
 
         return base
+    }
+
+    /**
+     * One eye's outline, as a closed polygon already in ball radii.
+     *
+     * The points are put through the tangent frame here rather than by the
+     * canvas. Qt's Context2D.transform() composes its matrix in the canvas's
+     * own space instead of on top of the transform already in force, which is
+     * not what the HTML canvas this code was written against does: a pure
+     * translation passed to it moves nothing at all. An eye placed that way
+     * lands in the wrong place, at the wrong angle, and half of it ends up
+     * outside the silhouette - which is exactly how the face was going wrong.
+     *
+     * Two multiplications by hand are both exact and shorter than working
+     * around it, and the arcs become a polygon nobody can tell from one: at
+     * the size this is drawn, a cap of fourteen segments is under a tenth of a
+     * pixel from the true curve.
+     */
+    function eyeOutline(eye, shape, radius, lid, originX, originY) {
+        const w = shape.w * radius
+        const h = shape.h * radius
+        const r = Math.min(w, h) / 2
+        // What is left of the long axis once the two round caps are taken off.
+        const straight = Math.max(0, h / 2 - r)
+        const steps = 14
+        const points = []
+
+        const place = (x, y) => {
+            points.push([originX + eye.a * x + eye.c * y,
+                         // The blink squashes the eye vertically on screen,
+                         // about its own centre - hence before the offset is
+                         // added, and on the y output only.
+                         originY + (eye.b * x + eye.d * y) * lid])
+        }
+
+        for (let i = 0; i <= steps; i++) {
+            const angle = (i / steps) * Math.PI
+            place(Math.cos(angle) * r, -straight - Math.sin(angle) * r)
+        }
+        for (let i = 0; i <= steps; i++) {
+            const angle = (i / steps) * Math.PI
+            place(-Math.cos(angle) * r, straight + Math.sin(angle) * r)
+        }
+        return points
     }
 
     /** Five particles, one born every 0.2 s, each living 0.55 s. */
@@ -364,48 +473,80 @@ Item {
         { a: 1.35, k: 0.44, tilt: 2.92, speed: 3.4, phase: 3.3, sweep: 0.61, hue: 310, width: 0.054 }
     ]
 
+    /**
+     * Two poses mixed.
+     *
+     * Geometry interpolates, decoration cross-fades in opacity instead: a dot
+     * on its way out and a dot on its way in are not the same dot, and sliding
+     * one into the other is a movement nothing in the reference makes. The
+     * pastille belongs to one mood or the other and simply changes hands
+     * halfway.
+     */
+    function mixPose(a, b, t) {
+        const out = 1 - t
+        const mix = (x, y) => x + (y - x) * t
+        const faded = (list, k) => (list || []).map(item => {
+            const copy = {}
+            for (const key in item) {
+                copy[key] = item[key]
+            }
+            copy.opacity = (item.opacity === undefined ? 1 : item.opacity) * k
+            return copy
+        })
+
+        return {
+            radius: mix(a.radius, b.radius),
+            cx: mix(a.cx, b.cx),
+            cy: mix(a.cy, b.cy),
+            gaze: {
+                yaw: mix(a.gaze.yaw, b.gaze.yaw),
+                pitch: mix(a.gaze.pitch, b.gaze.pitch),
+                roll: mix(a.gaze.roll, b.gaze.roll)
+            },
+            split: mix(a.split, b.split),
+            eyes: [{ w: mix(a.eyes[0].w, b.eyes[0].w), h: mix(a.eyes[0].h, b.eyes[0].h) },
+                   { w: mix(a.eyes[1].w, b.eyes[1].w), h: mix(a.eyes[1].h, b.eyes[1].h) }],
+            eyeAlpha: mix(a.eyeAlpha, b.eyeAlpha),
+            dots: faded(a.dots, out).concat(faded(b.dots, t)),
+            rings: faded(a.rings, out).concat(faded(b.rings, t)),
+            notif: t < 0.5 ? a.notif : b.notif,
+            dotsBehind: t < 0.5 ? a.dotsBehind : b.dotsBehind,
+            blink: a.blink && b.blink
+        }
+    }
+
+    /**
+     * The pose at `now`, whatever blend is in flight included. Taking every
+     * part of the state as an argument is what lets a mood change freeze the
+     * frame it interrupted: it can ask for the composite of the mood it is
+     * about to leave, from inside the change itself.
+     */
+    function composed(now, cur, curAt, prev, prevAt, frozenPose) {
+        const since = Math.max(0, now - curAt)
+        const current = pose(cur, since)
+        const morph = moodMorph(cur)
+        if (since >= morph) {
+            return current
+        }
+        const origin = frozenPose ? frozenPose
+                                  : (hasPrevious && prev !== cur
+                                     ? pose(prev, Math.max(0, now - prevAt))
+                                     : null)
+        if (!origin) {
+            return current
+        }
+        return mixPose(origin, current, maths.easeOutQuint(maths.clamp(since / morph)))
+    }
+
     // ---- rendering -------------------------------------------------------
     Canvas {
         id: canvas
         anchors.fill: parent
         antialiasing: true
-        renderStrategy: Canvas.Cooperative
-
-        function blendPose() {
-            const now = bot.clock
-            const current = bot.pose(bot.mood, now - bot.entered)
-            // A change of mood cross-fades over its own length rather than
-            // cutting, which is what keeps the eyes from teleporting.
-            const age = now - bot.entered
-            const morph = 0.42
-            if (age >= morph || bot.previousMood === bot.mood) {
-                return current
-            }
-            const k = maths.easeOutQuint(maths.clamp(age / morph))
-            const before = bot.pose(bot.previousMood, now - bot.previousEntered)
-            const mix = (a, b) => a + (b - a) * k
-            return {
-                radius: mix(before.radius, current.radius),
-                cx: mix(before.cx, current.cx),
-                cy: mix(before.cy, current.cy),
-                gaze: {
-                    yaw: mix(before.gaze.yaw, current.gaze.yaw),
-                    pitch: mix(before.gaze.pitch, current.gaze.pitch),
-                    roll: mix(before.gaze.roll, current.gaze.roll)
-                },
-                split: mix(before.split, current.split),
-                eyes: [{ w: mix(before.eyes[0].w, current.eyes[0].w),
-                         h: mix(before.eyes[0].h, current.eyes[0].h) },
-                       { w: mix(before.eyes[1].w, current.eyes[1].w),
-                         h: mix(before.eyes[1].h, current.eyes[1].h) }],
-                eyeAlpha: mix(before.eyeAlpha, current.eyeAlpha),
-                dots: current.dots,
-                rings: current.rings,
-                notif: current.notif,
-                dotsBehind: current.dotsBehind,
-                blink: current.blink && before.blink
-            }
-        }
+        // Painted on the same thread that asked for it: the item is a few
+        // dozen pixels across, and handing it to a worker thread only buys a
+        // frame of lag between the clock and what is on screen.
+        renderStrategy: Canvas.Immediate
 
         /** One ring, split into the half in front of the body and the half behind. */
         function ringPath(ctx, seed, time, front) {
@@ -460,18 +601,38 @@ Item {
             const radius = bot.ballRadius
             const centreX = width / 2
             const centreY = height / 2
-            const p = blendPose()
+            const now = bot.clock
+            const p = bot.composed(now, bot.mood, bot.entered,
+                                   bot.previousMood, bot.previousEntered, bot.frozen)
 
+            // At rest the reference is very nearly still - the centre is stable
+            // to a few thousandths and the radius is constant - so the life is
+            // in the gaze and the blinking. The drift and the breath below are
+            // deliberately tiny: they exist so the picture is not frozen, not
+            // so the bot floats. A visible bob on top is the thing the
+            // reference warns against by name.
             const life = bot.alive
                 ? {
-                      dYaw: (maths.loopNoise(bot.clock, 11.3, 0.4) * 5.5
-                             + maths.loopNoise(bot.clock, 3.7, 2.1) * 1.6),
-                      dPitch: (maths.loopNoise(bot.clock, 9.1, 1.3) * 4.2
-                               + maths.loopNoise(bot.clock, 4.3, 0.7) * 1.3),
-                      dRoll: maths.loopNoise(bot.clock, 13.7, 3.2) * 2.2,
-                      lid: p.blink ? bot.blinkLid(bot.clock) : 1
+                      dYaw: (maths.loopNoise(now, 11.3, 0.4) * 5.5
+                             + maths.loopNoise(now, 3.7, 2.1) * 1.6),
+                      dPitch: (maths.loopNoise(now, 9.1, 1.3) * 4.2
+                               + maths.loopNoise(now, 4.3, 0.7) * 1.3),
+                      dRoll: maths.loopNoise(now, 13.7, 3.2) * 2.2,
+                      lid: p.blink ? bot.blinkLid(now) : 1,
+                      driftX: maths.loopNoise(now, 7.9, 1.9) * 0.006,
+                      driftY: maths.loopNoise(now, 5.3, 0.3) * 0.007,
+                      breath: 1 + Math.sin((now / 3.4) * maths.tau) * 0.005
                   }
-                : { dYaw: 0, dPitch: 0, dRoll: 0, lid: 1 }
+                : { dYaw: 0, dPitch: 0, dRoll: 0, lid: 1, driftX: 0, driftY: 0, breath: 1 }
+
+            // A change of shape hides behind a blink, as every one of them does
+            // in the video. It closes and opens over 0.2s and only ever takes
+            // the eye further shut than the schedule already had it.
+            const forced = maths.clamp((now - bot.blinkAt) / 0.2)
+            const lidNow = Math.min(life.lid, forced < 1 ? Math.abs(forced * 2 - 1) : 1)
+
+            const bodyX = p.cx + life.driftX
+            const bodyY = p.cy + life.driftY
 
             ctx.save()
             ctx.translate(centreX, centreY)
@@ -493,11 +654,17 @@ Item {
                 ctx.globalAlpha = 1
             }
 
-            // The body.
+            // The body. The breath is a half-percent on the height only - the
+            // width is measured constant - so it is applied as a scale about
+            // the body's own centre rather than baked into the radius.
+            ctx.save()
+            ctx.translate(bodyX, bodyY)
+            ctx.scale(1, life.breath)
             ctx.fillStyle = bot.bodyColor
             ctx.beginPath()
-            ctx.arc(p.cx, p.cy, Math.max(0.001, p.radius), 0, maths.tau)
+            ctx.arc(0, 0, Math.max(0.001, p.radius), 0, maths.tau)
             ctx.fill()
+            ctx.restore()
 
             // The eyes, punched straight out of it. Because they remove rather
             // than cover, they clip themselves against the silhouette and the
@@ -510,36 +677,26 @@ Item {
                                              p.split)
                 // A blink squashes the eye vertically on screen, around its own
                 // centre; it is not the open eye scaled along its tilted axis.
-                const lid = 0.06 + 0.94 * maths.clamp(life.lid)
+                const lid = 0.06 + 0.94 * maths.clamp(lidNow)
                 ctx.globalCompositeOperation = "destination-out"
                 for (let i = 0; i < 2; i++) {
                     const eye = poses[i]
-                    if (eye.depth <= 0) {
+                    // An eye that has gone round the limb is not drawn at all;
+                    // the cut-off is the reference's, not zero, because an eye
+                    // exactly edge-on is a line and reads as a scratch.
+                    if (eye.depth <= 0.02) {
                         continue
                     }
-                    const shape = p.eyes[i]
-                    ctx.save()
-                    ctx.transform(eye.a, eye.b * lid, eye.c, eye.d * lid,
-                                  p.cx + eye.x, p.cy + eye.y)
+                    const outline = bot.eyeOutline(eye, p.eyes[i], p.radius, lid,
+                                                   bodyX + eye.x, bodyY + eye.y)
                     ctx.globalAlpha = p.eyeAlpha
-                    const w = shape.w * p.radius
-                    const h = shape.h * p.radius
-                    const r = Math.min(w, h) / 2
-                    // A capsule: a rounded rectangle whose radius is half its
-                    // short axis, which is the shape the reference measures.
                     ctx.beginPath()
-                    ctx.moveTo(-w / 2 + r, -h / 2)
-                    ctx.lineTo(w / 2 - r, -h / 2)
-                    ctx.arcTo(w / 2, -h / 2, w / 2, -h / 2 + r, r)
-                    ctx.lineTo(w / 2, h / 2 - r)
-                    ctx.arcTo(w / 2, h / 2, w / 2 - r, h / 2, r)
-                    ctx.lineTo(-w / 2 + r, h / 2)
-                    ctx.arcTo(-w / 2, h / 2, -w / 2, h / 2 - r, r)
-                    ctx.lineTo(-w / 2, -h / 2 + r)
-                    ctx.arcTo(-w / 2, -h / 2, -w / 2 + r, -h / 2, r)
+                    ctx.moveTo(outline[0][0], outline[0][1])
+                    for (let k = 1; k < outline.length; k++) {
+                        ctx.lineTo(outline[k][0], outline[k][1])
+                    }
                     ctx.closePath()
                     ctx.fill()
-                    ctx.restore()
                 }
                 ctx.globalCompositeOperation = "source-over"
                 ctx.globalAlpha = 1

@@ -49,9 +49,12 @@ Item {
 
         Column {
             id: column
-            x: 16
+            // The corner curve decides the minimum, so no card in the dashboard
+            // can end up half outside the black.
+            readonly property int hMargin: Math.max(16, Theme.edgeInset)
+            x: hMargin
             y: 14
-            width: parent.width - 32
+            width: parent.width - 2 * hMargin
             spacing: 14
 
             // ---- header -------------------------------------------------------

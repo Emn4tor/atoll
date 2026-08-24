@@ -41,7 +41,8 @@ Item {
     }
 
     implicitHeight: 52
-    implicitWidth: Math.min(Cfg.maxWidth, Math.max(340, layout.implicitWidth + 32))
+    implicitWidth: Math.min(Cfg.maxWidth,
+                            Math.max(340, layout.implicitWidth + Math.max(32, Theme.edgeInset * 2)))
 
     Row {
         id: layout

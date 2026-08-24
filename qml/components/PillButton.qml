@@ -13,6 +13,10 @@ Item {
     property color fill: Qt.rgba(1, 1, 1, 0.08)
     property color highlight: Qt.rgba(1, 1, 1, 0.16)
     property bool accented: false
+    /** What "accented" is filled with. Not every part of the island wants the
+        colour of the album art here - the assistant, for one, never does. */
+    property color accentColor: Theme.accent
+    readonly property bool hovered: mouse.containsMouse
 
     signal clicked()
 
@@ -23,7 +27,8 @@ Item {
         anchors.fill: parent
         radius: height / 2
         color: button.accented
-               ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, mouse.containsMouse ? 0.95 : 0.8)
+               ? Qt.rgba(button.accentColor.r, button.accentColor.g, button.accentColor.b,
+                         mouse.containsMouse ? 0.95 : 0.8)
                : (mouse.containsMouse ? button.highlight : button.fill)
 
         Behavior on color {

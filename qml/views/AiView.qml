@@ -11,6 +11,11 @@ import Atoll
  * and only what sits next to the face changes. Switching whole views here
  * would make the island jump on every step the assistant takes, and it takes
  * a lot of them.
+ *
+ * Nothing in here is drawn in the accent colour. The accent follows the album
+ * art, and an assistant that is teal during one song and orange during the
+ * next reads as a different assistant each time - so it has one colour of its
+ * own, `Theme.assistantTint`, and keeps it whatever is playing.
  */
 Item {
     id: view
@@ -25,6 +30,9 @@ Item {
     Keys.onEscapePressed: view.dismissRequested()
 
     readonly property int panelWidth: Math.min(Cfg.maxAiWidth, Cfg.get("ai.panelWidth", 560))
+
+    /** The assistant's own colour, used everywhere the accent would have been. */
+    readonly property color tint: Theme.assistantTint
 
     implicitWidth: panelWidth
     implicitHeight: Math.max(Cfg.collapsedHeight, content.implicitHeight + 26)
@@ -49,6 +57,13 @@ Item {
     // in the box after a long press.
     Component.onCompleted: Qt.callLater(view.focusInput)
 
+    // Coming back from a question - "which screen?", or one the assistant put
+    // up itself - lands in the box the user was already typing in, with what
+    // they had typed still there.
+    onPhaseChanged: if (phase === "composing") {
+        Qt.callLater(view.focusInput)
+    }
+
     // ---- the face --------------------------------------------------------
     readonly property string mood: {
         switch (phase) {
@@ -62,6 +77,9 @@ Item {
             return "idle"
         case "working":
             return "working"
+        case "choosing":
+            // Waiting on the user rather than on the machine.
+            return "listening"
         case "permission":
             return "alert"
         case "done":
@@ -73,13 +91,30 @@ Item {
         }
     }
 
+    /**
+     * Whether the answer on screen ends in a question. The assistant is told to
+     * put a real choice up as buttons instead, but a model that ignores that
+     * and ends on "shall I?" leaves the user looking at three buttons none of
+     * which is a reply - so the first one is renamed into the reply it is.
+     */
+    readonly property bool answerAsksBack: /\?\s*$/.test((ai.answer ?? "").trim())
+
+    /**
+     * The line under a question, taken from whichever option the pointer is
+     * over. It is where "DP-1" turns into "DP-1 - LG (2560x1440), main"
+     * without any of that having to fit on the button.
+     */
+    property string hoveredDetail: ""
+
     Column {
         id: content
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.leftMargin: 16
-        anchors.rightMargin: 16
+        // Never closer to the side than the corner curve reaches in, so the
+        // outermost rows stay over the black however round the island is.
+        anchors.leftMargin: Math.max(16, Theme.edgeInset)
+        anchors.rightMargin: Math.max(16, Theme.edgeInset)
         spacing: 10
 
         // ---- head row: face, and whatever the assistant is doing ----------
@@ -94,7 +129,7 @@ Item {
                 mood: view.mood
                 bodyColor: view.phase === "failed" || view.phase === "permission"
                            ? Theme.critical
-                           : Theme.accent
+                           : view.tint
                 size: 26
                 visible: Cfg.get("ai.avatar", true)
             }
@@ -116,7 +151,7 @@ Item {
                     color: Qt.rgba(1, 1, 1, prompt.activeFocus ? 0.10 : 0.06)
                     border.width: 1
                     border.color: prompt.activeFocus
-                                  ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
+                                  ? Qt.rgba(view.tint.r, view.tint.g, view.tint.b, 0.55)
                                   : Theme.borderColor
 
                     Behavior on color {
@@ -134,7 +169,7 @@ Item {
                     anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
                     color: Theme.foreground
-                    selectionColor: Theme.accent
+                    selectionColor: view.tint
                     selectedTextColor: Theme.background
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.size(13)
@@ -177,13 +212,32 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 2
 
+                    // Which screen, for people who would rather settle it now
+                    // than be asked when they press send. It only appears when
+                    // there is actually more than one to choose between.
+                    PillButton {
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: view.ai.shareScreen && view.ai.severalScreens
+                        height: 26
+                        label: {
+                            const choice = view.ai.screenChoice
+                            if (choice === "ask")
+                                return qsTr("Pick screen")
+                            if (choice === "all")
+                                return qsTr("All screens")
+                            return choice
+                        }
+                        tint: view.tint
+                        onClicked: view.ai.pickScreen()
+                    }
+
                     RoundButton {
                         anchors.verticalCenter: parent.verticalCenter
                         width: 26
                         height: 26
                         visible: view.ai.screenAvailable && Cfg.get("ai.allowScreenshots", true)
                         icon: ["video-display", "camera-photo", "image-x-generic"]
-                        tint: view.ai.shareScreen ? Theme.accent : Theme.foreground
+                        tint: view.ai.shareScreen ? view.tint : Theme.foreground
                         opacity: view.ai.shareScreen ? 1 : 0.6
                         onClicked: view.ai.shareScreen = !view.ai.shareScreen
                     }
@@ -194,7 +248,7 @@ Item {
                         height: 26
                         enabled: prompt.text.trim().length > 0
                         icon: ["go-up", "document-send", "mail-send"]
-                        tint: Theme.accent
+                        tint: view.tint
                         onClicked: {
                             view.ai.ask(prompt.text)
                             prompt.text = ""
@@ -225,6 +279,8 @@ Item {
                             return view.ai.activity.length > 0 ? view.ai.activity : qsTr("Working…")
                         case "permission":
                             return view.ai.pendingSummary
+                        case "choosing":
+                            return view.ai.choiceQuestion
                         case "failed":
                             return qsTr("That did not work")
                         default:
@@ -236,7 +292,11 @@ Item {
                     font.pixelSize: Theme.size(13)
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
-                    maximumLineCount: 1
+                    // A question the user has to answer is worth two lines; one
+                    // line and an ellipsis would hide half of what they are
+                    // being asked.
+                    maximumLineCount: view.phase === "choosing" ? 2 : 1
+                    wrapMode: view.phase === "choosing" ? Text.Wrap : Text.NoWrap
                 }
 
                 Text {
@@ -251,6 +311,16 @@ Item {
                                    : qsTr("Add a key for Claude or Gemini and the island can act on this machine.")
                         case "permission":
                             return view.ai.pendingTier
+                        case "choosing":
+                            // Whatever the pointer is over, which is where the
+                            // long version of a short button label lives.
+                            return view.hoveredDetail
+                        case "working":
+                            // Worth a line: the user handed over the wheel, and
+                            // should be able to see that they did.
+                            return view.ai.unattended
+                                   ? qsTr("Acting on its own - stop it any time")
+                                   : ""
                         case "thinking":
                             return view.ai.thought.length > 0
                                    ? view.ai.thought.slice(-110)
@@ -259,7 +329,7 @@ Item {
                             return ""
                         }
                     }
-                    color: view.phase === "permission" ? Theme.accent : Theme.muted
+                    color: view.phase === "permission" ? view.tint : Theme.muted
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.size(10)
                     elide: Text.ElideRight
@@ -318,7 +388,8 @@ Item {
             readonly property string answerText: view.ai.answer
             visible: answerText.length > 0
                      && (view.phase === "answering" || view.phase === "done"
-                         || view.phase === "working" || view.phase === "thinking")
+                         || view.phase === "working" || view.phase === "thinking"
+                         || view.phase === "choosing")
             height: visible ? Math.min(answerScroll.contentHeight, 190) : 0
 
             Flickable {
@@ -376,7 +447,7 @@ Item {
             width: parent.width
             visible: view.ai.steps.length > 0
                      && (view.phase === "working" || view.phase === "permission"
-                         || view.phase === "done")
+                         || view.phase === "choosing" || view.phase === "done")
             spacing: 3
 
             Repeater {
@@ -405,7 +476,7 @@ Item {
                             case "elevated":
                                 return "#f0a020"
                             default:
-                                return Theme.accent
+                                return view.tint
                             }
                         }
 
@@ -433,7 +504,12 @@ Item {
         }
 
         // ---- buttons -------------------------------------------------------
-        Row {
+        //
+        // A Flow rather than a Row: the assistant can put up to five answers of
+        // its own here, and five answers plus a way out is more than fits
+        // across a pill. Wrapping makes the island taller, which is the right
+        // thing to do with a question that needs the room.
+        Flow {
             width: parent.width
             visible: buttons.count > 0
             spacing: 7
@@ -446,10 +522,22 @@ Item {
                     required property var modelData
 
                     accented: modelData.accented ?? false
+                    accentColor: view.tint
                     tint: (modelData.destructive ?? false) ? Theme.critical : Theme.foreground
                     icon: modelData.icon ?? []
                     label: modelData.label
                     onClicked: modelData.action()
+                    // The long version of this answer, while the pointer is on
+                    // it. Cleared on the way out, but only if nothing else has
+                    // claimed the line since.
+                    onHoveredChanged: {
+                        const detail = modelData.detail ?? ""
+                        if (hovered) {
+                            view.hoveredDetail = detail
+                        } else if (view.hoveredDetail === detail) {
+                            view.hoveredDetail = ""
+                        }
+                    }
                 }
             }
         }
@@ -477,6 +565,18 @@ Item {
                   action: () => { App.openSettings("ai"); view.dismissRequested() } },
                 { label: qsTr("Not now"), action: () => view.dismissRequested() }
             ]
+        case "choosing":
+            // The assistant's own question, or Atoll's own - either way the
+            // answers are whatever was put up, and there is always a way to
+            // decline to answer, because a question with no way out is a trap.
+            return view.ai.choiceOptions.map(option => ({
+                label: option.label,
+                detail: option.detail ?? "",
+                accented: option.accented ?? false,
+                action: () => view.ai.choose(option.id)
+            })).concat([
+                { label: qsTr("Never mind"), action: () => view.ai.choose("") }
+            ])
         case "thinking":
         case "answering":
         case "working":
@@ -486,21 +586,29 @@ Item {
                 { label: qsTr("Stop"), destructive: true, action: () => view.ai.cancel() }
             ]
         case "permission":
+            // The first button is the one most people mean: they asked for a
+            // job to be done, not to be consulted about each command it takes.
+            // Saying it once covers the rest of the conversation; a root step
+            // still meets the desktop's own password dialog afterwards.
             if (view.ai.pendingElevated) {
                 return [
-                    { label: qsTr("Allow"), accented: true, icon: ["security-high", "dialog-password"],
-                      action: () => view.ai.allow(false) },
+                    { label: qsTr("Allow, and stop asking"), accented: true,
+                      icon: ["security-high", "dialog-password"],
+                      action: () => view.ai.allowEverything() },
+                    { label: qsTr("Just this once"), action: () => view.ai.allow(false) },
                     { label: qsTr("Don't allow"), destructive: true, action: () => view.ai.deny() }
                 ]
             }
             return [
-                { label: qsTr("Allow once"), accented: true, action: () => view.ai.allow(false) },
-                { label: qsTr("Allow this session"), action: () => view.ai.allow(true) },
+                { label: qsTr("Allow, and stop asking"), accented: true,
+                  action: () => view.ai.allowEverything() },
+                { label: qsTr("Just this once"), action: () => view.ai.allow(false) },
                 { label: qsTr("No"), destructive: true, action: () => view.ai.deny() }
             ]
         case "done":
             return [
-                { label: qsTr("Ask something else"), accented: true,
+                { label: view.answerAsksBack ? qsTr("Answer") : qsTr("Ask something else"),
+                  accented: true,
                   action: () => { view.ai.engage(); Qt.callLater(view.focusInput) } },
                 { label: qsTr("New conversation"), action: () => view.ai.startOver() },
                 { label: qsTr("Close"), action: () => view.dismissRequested() }

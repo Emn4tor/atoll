@@ -9,8 +9,11 @@
 
 #include <QObject>
 #include <QQueue>
+#include <QStringList>
 #include <QVariantList>
 #include <QtQml/qqmlregistration.h>
+
+#include <functional>
 
 class AiToolbox;
 class AnthropicProvider;
@@ -48,7 +51,7 @@ class AiService : public QObject
     Q_PROPERTY(QString model READ model NOTIFY configurationChanged)
 
     /**
-     * setup | composing | thinking | answering | permission | working | done | failed
+     * setup | composing | thinking | answering | permission | choosing | working | done | failed
      * Only meaningful while `engaged`.
      */
     Q_PROPERTY(QString state READ state NOTIFY stateChanged)
@@ -80,6 +83,8 @@ class AiService : public QObject
     Q_PROPERTY(QString pendingRisk READ pendingRisk NOTIFY pendingChanged)
     /** Whether saying yes will bring up a system password prompt. */
     Q_PROPERTY(bool pendingElevated READ pendingElevated NOTIFY pendingChanged)
+    /** True once the user has told it to stop asking for this conversation. */
+    Q_PROPERTY(bool unattended READ unattended NOTIFY stateChanged)
 
     // ---- the command-line client, for the settings window -----------------
     /** missing | signed-out | checking | ready */
@@ -87,9 +92,31 @@ class AiService : public QObject
     /** One sentence about that state, for the person reading it. */
     Q_PROPERTY(QString cliDetail READ cliDetail NOTIFY cliChanged)
 
+    // ---- a question with buttons under it ---------------------------------
+    //
+    // Both the assistant and Atoll itself need to put a small choice to the
+    // user - "which of these do you want", "which screen shall I look at" -
+    // and neither is a permission prompt. One mechanism serves both: a line of
+    // text, a handful of options, and whatever should happen with the answer.
+    /** What is being asked, while the state is "choosing". */
+    Q_PROPERTY(QString choiceQuestion READ choiceQuestion NOTIFY choiceChanged)
+    /** `[{id, label, detail, accented}]`, in the order they should be shown. */
+    Q_PROPERTY(QVariantList choiceOptions READ choiceOptions NOTIFY choiceChanged)
+
     /** Whether the next question carries a picture of the screen. */
     Q_PROPERTY(bool shareScreen READ shareScreen WRITE setShareScreen NOTIFY shareScreenChanged)
     Q_PROPERTY(bool screenAvailable READ screenAvailable CONSTANT)
+    /** The outputs a picture can be taken of: `[{name, label, width, height}]`. */
+    Q_PROPERTY(QVariantList screens READ screens NOTIFY screensChanged)
+    /** True when there is more than one, which is when the question is worth asking. */
+    Q_PROPERTY(bool severalScreens READ severalScreens NOTIFY screensChanged)
+    /**
+     * Which output pictures are taken of: an output name, "all", "current", or
+     * "ask" to put the question to the user each time. Kept for the
+     * conversation, not written to the configuration, so a choice made for one
+     * question does not quietly become the setting.
+     */
+    Q_PROPERTY(QString screenChoice READ screenChoice WRITE setScreenChoice NOTIFY screensChanged)
 
 public:
     explicit AiService(Config *config, QObject *parent = nullptr);
@@ -158,9 +185,19 @@ public:
     {
         return m_pending.risk == AiRisk::Admin;
     }
+    bool unattended() const;
 
     QString cliState() const;
     QString cliDetail() const;
+
+    QString choiceQuestion() const
+    {
+        return m_choiceQuestion;
+    }
+    QVariantList choiceOptions() const
+    {
+        return m_choiceOptions;
+    }
 
     bool shareScreen() const
     {
@@ -168,6 +205,10 @@ public:
     }
     void setShareScreen(bool share);
     bool screenAvailable() const;
+    QVariantList screens() const;
+    bool severalScreens() const;
+    QString screenChoice() const;
+    void setScreenChoice(const QString &choice);
 
     // ---- what the island calls ------------------------------------------
     /** Long press: open the assistant, or the setup prompt if it has no key. */
@@ -182,9 +223,26 @@ public:
     Q_INVOKABLE void bringToFront();
     /** Answer the permission the island is showing. */
     Q_INVOKABLE void allow(bool rememberForSession);
+    /**
+     * Allow this one and everything after it, until the conversation ends.
+     * The one answer somebody wants to give when they asked for a job rather
+     * than for a step.
+     */
+    Q_INVOKABLE void allowEverything();
     Q_INVOKABLE void deny();
     /** Forget the conversation and every allowance granted in it. */
     Q_INVOKABLE void startOver();
+    /**
+     * Answer whatever is being asked in the "choosing" state. An id nobody
+     * offered - or an empty one - counts as walking away from the question,
+     * which is a legitimate answer and is passed on as such.
+     */
+    Q_INVOKABLE void choose(const QString &id);
+    /**
+     * Put the "which screen" question up on its own, for somebody who wants to
+     * settle it before they ask rather than when they are asked.
+     */
+    Q_INVOKABLE void pickScreen();
 
     /**
      * Decide whether a tool call the command-line client is about to make may
@@ -192,6 +250,26 @@ public:
      * may be a long time later, because the answer is usually a person's.
      */
     void reviewToolCall(const QString &payload, const QString &token);
+
+    /**
+     * Take the picture the assistant asked for and answer with where it went.
+     * The path is Atoll's to choose, so the caller does not name one.
+     *
+     * `screenName` may be an output, "all", "current", or empty - and empty on
+     * a machine with several outputs is what puts the question to the user
+     * rather than sending back a picture of everything at once.
+     */
+    void captureScreenFor(const QString &token, const QString &screenName = {});
+
+    /**
+     * Put a question with buttons on the island on the assistant's behalf and
+     * answer with the option the user picked, or with a line starting
+     * "error:" if they closed it instead.
+     */
+    void askUserFor(const QString &token, const QString &question, const QStringList &options);
+
+    /** The outputs, as a line the assistant can be told about. */
+    Q_INVOKABLE QString screenSummary() const;
 
     // ---- what the settings window calls ----------------------------------
     Q_INVOKABLE bool hasKeyFor(const QString &provider) const;
@@ -219,11 +297,17 @@ Q_SIGNALS:
     void activityChanged();
     void stepsChanged();
     void pendingChanged();
+    void choiceChanged();
     void shareScreenChanged();
+    void screensChanged();
     void keyTestChanged();
     void cliChanged();
     /** `verdictJson` is what the waiting tool call gets told. */
     void toolReviewAnswered(const QString &token, const QString &verdictJson);
+    /** The path the picture was written to, or a line starting "error:". */
+    void screenCaptureAnswered(const QString &token, const QString &result);
+    /** The option the user picked, or a line starting "error:". */
+    void userChoiceAnswered(const QString &token, const QString &result);
     /** The assistant wants a line shown on the island. */
     void messageRequested(const QString &summary, const QString &body);
     /** The island should give the input field the keyboard. */
@@ -246,11 +330,41 @@ private:
     /** Put the next tool call that needs a person in front of them. */
     void showNextReview();
 
+    /**
+     * Put a question with buttons in front of the user. `then` is handed the
+     * id of the option they picked, or an empty string if the question went
+     * away unanswered - every caller has to answer that case, because
+     * something is always waiting on the other end of it.
+     */
+    void askChoice(const QString &question,
+                   const QVariantList &options,
+                   std::function<void(const QString &)> then);
+    /** Take back an unanswered question, telling whoever asked it. */
+    void abandonChoice();
+    /** The options for "which screen", including everything at once. */
+    QVariantList screenOptions() const;
+    /**
+     * Settle which output a picture is of, asking the user when the answer is
+     * "ask" and there is more than one. `then` is given the output's name, or
+     * an empty string if the question was walked away from.
+     */
+    void withChosenScreen(const QString &requested, std::function<void(const QString &)> then);
+    /** Resolve "current"/"all"/a name into what ScreenCapture wants. */
+    QString resolveScreen(const QString &choice) const;
+    /** A capture already decided upon: takes it, and hands the bytes over. */
+    void takeScreenshot(const QString &screenName,
+                        std::function<void(const QByteArray &)> onImage,
+                        std::function<void(const QString &)> onError);
+
     void runTurn();
     void onTurnEnded(const QString &stopReason, const QList<AiToolCall> &calls, const QJsonArray &raw);
     /** Take the next call off the queue: classify it, ask, or run it. */
     void advanceQueue();
     void executeNow(const AiToolCall &call, const AiVerdict &verdict);
+    /** The assistant's own question, put on the island as buttons. */
+    void presentQuestion(const AiToolCall &call);
+    /** Answer a tool call from here rather than from the toolbox. */
+    void finishToolLocally(const AiToolCall &call, const QString &content, bool isError);
     void onToolResult(const AiToolResult &result);
     void finishToolRound();
     void fail(const QString &reason);
@@ -276,6 +390,15 @@ private:
     QString m_keyTest;
     QVariantList m_steps;
     bool m_shareScreen = false;
+    /** "ask", "all", "current", or an output name. */
+    QString m_screenChoice = QStringLiteral("ask");
+
+    QString m_choiceQuestion;
+    QVariantList m_choiceOptions;
+    /** What to do with the answer. Empty when nothing is being asked. */
+    std::function<void(const QString &)> m_choiceThen;
+    /** The state to go back to if the question is abandoned. */
+    QString m_stateBeforeChoice;
     /** Guards against a model that keeps calling tools and never answers. */
     int m_rounds = 0;
 
@@ -301,6 +424,8 @@ private:
     AiToolCall m_current;
     AiVerdict m_pending;
     bool m_awaitingPermission = false;
+    /** True while cancel() is unwinding, so nothing it releases starts a new turn. */
+    bool m_cancelling = false;
     /** True while the turn is only a key test, so the UI stays out of it. */
     bool m_testing = false;
 };
