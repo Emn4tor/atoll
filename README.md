@@ -28,11 +28,11 @@ particular.
 
 | State | What you see |
 |---|---|
-| **Idle** | The clock, the cover of whatever is playing and a dot for anything waiting - the island always has something to show. A satellite blob buds off it while music plays. |
+| **Idle** | The clock, the cover of whatever is playing and a dot for anything waiting - each of those is a switch, so the pill can carry the day and date instead, or nothing but the time. A satellite blob buds off it while music plays. |
 | **OSD** | Volume, brightness, microphone, keyboard layout, power profile — anything Plasma announces. |
 | **Notification** | App icon or image, summary and body, with a progress bar for the notifications that carry one. |
 | **Media** | Album art, scrolling title, album, spectrum, and transport controls that fade in on hover. While synced lyrics exist, the second line becomes the words being sung. |
-| **Expanded** | Clock, battery, seekable transport, a scrolling lyrics panel, notification history and quick toggles. |
+| **Expanded** | Clock, battery, seekable transport, a scrolling lyrics panel, notification history and quick toggles - including Bluetooth power, plus a collapsible panel of paired devices (off by default; enable *Bluetooth device panel* in the settings) where a click connects and disconnects. |
 | **Sharing** | Drag files onto the island and it turns into a drop target, then a list of the devices nearby. Files coming the other way ask before they land. |
 | **Assistant** | Hold the island. The screen edges light up, a question box opens, and Claude or Gemini answers — and, one permission at a time, does the thing. |
 
@@ -403,11 +403,13 @@ while you watch. Keys you are most likely to want:
 | `appearance.accent` | `"auto"` follows the album art, or pin a colour. |
 | `effects.gooey` | The metaball merge between the island and its satellite. |
 | `notifications.ignoredApps` | Apps the island should stay quiet about. |
+| `modules.bluetooth` | Bluetooth power and device connections in the dashboard. |
+| `idle.*` | What the resting pill shows: clock, day and date, cover, dots, next event. |
 | `media.preferred` | Player names to favour, in order. |
 | `lyrics.enabled` | Whether to look lyrics up at all. |
 | `lyrics.offsetMs` | Shifts every lyric line, for players that report position late. |
 | `sharing.autoAccept` | Take offered files without asking first. |
-| `ai.provider` | `"claude-cli"` signs in with the Claude Code client, `"anthropic"` and `"gemini"` use an API key. |
+| `ai.provider` | `"claude-cli"` signs in with the Claude Code client; `"anthropic"`, `"gemini"` and `"openrouter"` use an API key. |
 | `ai.cliPath` | Where that client lives, for the installs Atoll does not find by itself. |
 | `ai.permissions.mode` | `"readonly"`, `"guarded"` or `"trusted"` - the same choice as in the settings window. |
 | `lockScreen.enabled` | Whether to ask to stay visible while the session is locked. |
